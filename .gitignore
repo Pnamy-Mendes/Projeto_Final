@@ -1,40 +1,51 @@
-# Ignore the backend dataset folder
+# Ignore dataset folder in backend
 backend/dataset/
 
-# Ignore the frontend node_modules folder
-frontend/node_modules/
+# Ignore node_modules folder in frontend
 frontend/mood-prediction-app/node_modules/
 
 # Ignore Python cache files
-*.pyc
 __pycache__/
+*.pyc
+*.pyo
 
-# Ignore virtual environment folders
-venv/
-.env/
-
-# Ignore Conda environment folders
+# Ignore environment files
+.env
+.venv
 env/
-.conda/
+venv/
+ENV/
 
 # Ignore Jupyter Notebook checkpoints
-.ipynb_checkpoints/
+.ipynb_checkpoints
 
-# Ignore VSCode settings
-.vscode/
-
-# Ignore MacOS system files
-.DS_Store
-
-# Ignore temporary files
-*.tmp
+# Ignore logs and databases
 *.log
+*.sql
+*.sqlite
 
-# Ignore IDE project files
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE/editor config files
+.vscode/
 .idea/
-*.iml
+*.sublime-project
+*.sublime-workspace
 
-# Ignore compiled files
-*.o
-*.out
-*.class
+# Ignore virtual environments
+*.env
+
+# Ignore build artifacts
+build/
+dist/
+*.egg-info/
+
+# Ignore coverage reports
+.coverage
+*.cover
+.coverage.*
+.nyc_output/
+coverage/
+coverage-final.json
