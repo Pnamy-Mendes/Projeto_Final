@@ -1,0 +1,39 @@
+# Ignore the backend dataset folder
+backend/dataset/
+
+# Ignore the frontend node_modules folder
+frontend/node_modules/
+
+# Ignore Python cache files
+*.pyc
+__pycache__/
+
+# Ignore virtual environment folders
+venv/
+.env/
+
+# Ignore Conda environment folders
+env/
+.conda/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Ignore VSCode settings
+.vscode/
+
+# Ignore MacOS system files
+.DS_Store
+
+# Ignore temporary files
+*.tmp
+*.log
+
+# Ignore IDE project files
+.idea/
+*.iml
+
+# Ignore compiled files
+*.o
+*.out
+*.class
