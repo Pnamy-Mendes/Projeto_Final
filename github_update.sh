@@ -18,6 +18,12 @@ configure_git_identity() {
     fi
 }
 
+# Function to configure Git settings for large files
+configure_git_settings() {
+    git config --global http.postBuffer 524288000  # 500MB
+    git config --global http.maxRequestBuffer 100M
+}
+
 # Function to get the current branch name
 get_current_branch() {
     git branch --show-current 2>/dev/null || echo "main"
@@ -55,10 +61,12 @@ update_repo() {
 if [ -d .git ]; then
     echo "Git repository already initialized. Updating repository..."
     configure_git_identity
+    configure_git_settings
     update_repo
 else
     echo "Git repository not found. Initializing repository..."
     configure_git_identity
+    configure_git_settings
     initialize_repo
 fi
 
