@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import Chart from 'chart.js/auto';
 
+const backendPort = process.env.REACT_APP_BACKEND_PORT || 5001;
+
 const App = () => {
     const [mood, setMood] = useState('Unknown');
     const [confidence, setConfidence] = useState(0);
@@ -12,26 +14,20 @@ const App = () => {
     const chartRef = useRef(null);
     const [isPredicting, setIsPredicting] = useState(false);
     const [currentStream, setCurrentStream] = useState(null);
-    const [backendPort, setBackendPort] = useState(5001);
+    const [devices, setDevices] = useState([]);
+    const [selectedDeviceId, setSelectedDeviceId] = useState('');
 
     useEffect(() => {
-        fetchBackendPort();
+        loadHistory();
+        getDevices();
+        initializeChart();
     }, []);
 
     useEffect(() => {
-        if (backendPort) {
-            loadHistory();
+        if (selectedDeviceId) {
+            startStream();
         }
-    }, [backendPort]);
-
-    const fetchBackendPort = async () => {
-        try {
-            const response = await axios.get('http://127.0.0.1:5001/config');
-            setBackendPort(response.data.port);
-        } catch (error) {
-            console.error('Error fetching backend port:', error);
-        }
-    };
+    }, [selectedDeviceId]);
 
     const loadHistory = async () => {
         try {
@@ -85,6 +81,30 @@ const App = () => {
         setIsPredicting(false);
     };
 
+    const initializeChart = () => {
+        const ctx = document.getElementById('mood-graph').getContext('2d');
+        chartRef.current = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Confidence',
+                    data: [],
+                    backgroundColor: 'rgba(0, 123, 255, 0.5)',
+                    borderColor: 'rgba(0, 123, 255, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { display: true },
+                    y: { beginAtZero: true, max: 100 }
+                }
+            }
+        });
+    };
+
     const updateGraph = (newConfidence) => {
         const chart = chartRef.current;
         if (chart) {
@@ -109,50 +129,52 @@ const App = () => {
         ]);
     };
 
-    useEffect(() => {
-        if (!chartRef.current) {
-            const ctx = document.getElementById('mood-graph').getContext('2d');
-            chartRef.current = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: [],
-                    datasets: [{
-                        label: 'Confidence',
-                        data: [],
-                        backgroundColor: 'rgba(0, 255, 255, 0.2)',
-                        borderColor: 'rgba(0, 255, 255, 1)',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: false,
-                    scales: {
-                        x: { display: false },
-                        y: { beginAtZero: true, max: 100 }
-                    }
-                }
-            });
-        }
-    }, []);
-
     const startStream = async () => {
         if (currentStream) {
             currentStream.getTracks().forEach(track => track.stop());
         }
-        const constraints = { video: true };
-        const stream = await navigator.mediaDevices.getUserMedia(constraints);
-        setCurrentStream(stream);
-        videoRef.current.srcObject = stream;
+        const constraints = {
+            video: {
+                deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined
+            }
+        };
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            setCurrentStream(stream);
+            videoRef.current.srcObject = stream;
+        } catch (error) {
+            console.error('Error starting video stream:', error);
+            setError('Error starting video stream');
+        }
     };
 
-    useEffect(() => {
-        startStream();
-    }, []);
+    const getDevices = async () => {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            setDevices(videoDevices);
+            if (videoDevices.length > 0) {
+                setSelectedDeviceId(videoDevices[0].deviceId);
+            }
+        } catch (error) {
+            console.error('Error getting devices:', error);
+        }
+    };
 
     return (
         <div>
             <h1>Webcam Mood Prediction</h1>
             <div>
+                <div>
+                    <label htmlFor="videoSource">Choose a camera:</label>
+                    <select id="videoSource" value={selectedDeviceId} onChange={(e) => setSelectedDeviceId(e.target.value)}>
+                        {devices.map((device, index) => (
+                            <option key={device.deviceId} value={device.deviceId}>
+                                {device.label || `Camera ${index + 1}`}
+                            </option>
+                        ))}
+                    </select>
+                </div>
                 <video ref={videoRef} autoPlay playsInline width="640" height="480"></video>
                 <button onClick={isPredicting ? stopPrediction : startPrediction}>
                     {isPredicting ? 'Stop Prediction' : 'Start Prediction'}

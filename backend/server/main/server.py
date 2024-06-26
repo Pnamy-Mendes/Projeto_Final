@@ -1,9 +1,8 @@
 import os
 import sys
-import socket
 import yaml
-import base64
 import cv2
+import base64
 import numpy as np
 import tensorflow as tf
 from flask import Flask, render_template, request, jsonify
@@ -12,8 +11,7 @@ from datetime import datetime
 import json
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
-from utils.helpers import load_config, find_available_port, preprocess_image, draw_landmarks, extract_features, setup_tensorflow_gpu
+from utils.helpers import load_config, preprocess_image, draw_landmarks, extract_features, setup_tensorflow_gpu
 
 app = Flask(__name__, static_url_path='/static')
 CORS(app)
@@ -114,14 +112,8 @@ if __name__ == '__main__':
     if not os.path.exists('static/results'):
         os.makedirs('static/results')
 
-    available_port = find_available_port(config['server']['port'])
-    config['server']['port'] = available_port
-
-    with open(os.path.join(os.path.dirname(__file__), '../../config.yaml'), 'w') as file:
-        yaml.safe_dump(config, file)
-
     setup_tensorflow_gpu()
 
-    app.run(host=config['server']['host'], port=available_port, debug=True, ssl_context=(
+    app.run(host=config['server']['host'], port=config['server']['port'], debug=True, ssl_context=(
         os.path.join(os.path.dirname(__file__), 'cert.pem'), 
         os.path.join(os.path.dirname(__file__), 'key.pem')))
