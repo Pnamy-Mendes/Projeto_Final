@@ -26,7 +26,7 @@ configure_git_settings() {
 
 # Function to get the current branch name
 get_current_branch() {
-    git branch --show-current 2>/dev/null || echo "Pedro"
+    git branch --show-current 2>/dev/null || echo "Master"
 }
 
 # Function to initialize the git repository
@@ -40,7 +40,7 @@ initialize_repo() {
     echo "Adding remote repository..."
     git remote add origin "$REPO_URL"
     echo "Pushing to remote repository..."
-    git push -u origin "$(get_current_branch)"
+    git push --force -u origin "$(get_current_branch)"
 }
 
 # Function to update the repository
