@@ -1,0 +1,55 @@
+# Ignore dataset folder in backend
+backend/dataset/
+
+# Ignore node_modules folder in frontend
+frontend/node_modules/
+frontend/mood-prediction-app/node_modules/
+backend/cache/
+
+# Ignore Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore environment files
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Ignore Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Ignore logs and databases
+*.log
+*.sql
+*.sqlite
+
+# Ignore system files
+.DS_Store
+Thumbs.db
+
+# Ignore IDE/editor config files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Ignore virtual environments
+*.env
+
+# Ignore build artifacts
+build/
+dist/
+*.egg-info/
+
+# Ignore coverage reports
+.coverage
+*.cover
+.coverage.*
+.nyc_output/
+coverage/
+coverage-final.jsoncache/UTK_age_gender_race/data_cache.npz
+cache/UTK_age_gender_race/data_cache.npz
+cache/UTK_age_gender_race/data_cache.npz

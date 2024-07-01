@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Webcam Mood and Demographics Prediction</title>
+    <link rel="stylesheet" type="text/css" href="static/css/styles.css">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <h1>Webcam Mood and Demographics Prediction</h1>
+    <div id="container">
+        <div id="video-container">
+            <video id="webcam" autoplay playsinline></video>
+            <div>
+                <select id="camera-select"></select>
+                <button id="toggle-button">Start Prediction</button>
+            </div>
+            <div id="predictions">
+                <div id="mood">Mood: Unknown</div>
+                <div id="age">Age: Unknown</div>
+                <div id="gender">Gender: Unknown</div>
+                <div id="race">Race: Unknown</div>
+            </div>
+            <div id="error"></div>
+        </div>
+        <div id="graph-container">
+            <canvas id="mood-graph" class="prediction-graph"></canvas>
+            <canvas id="age-graph" class="prediction-graph"></canvas>
+            <canvas id="gender-graph" class="prediction-graph"></canvas>
+            <canvas id="race-graph" class="prediction-graph"></canvas>
+        </div>
+    </div>
+    <section>
+        <div class="container">
+            <div class="carousel">
+                <input type="radio" name="slides" checked="checked" id="slide-1">
+                <input type="radio" name="slides" id="slide-2">
+                <input type="radio" name="slides" id="slide-3">
+                <input type="radio" name="slides" id="slide-4">
+                <ul class="carousel__slides">
+                    <li class="carousel__slide">
+                        <label for="slide-1">Mood Graph</label>
+                        <canvas id="mood-graph-carousel"></canvas>
+                    </li>
+                    <li class="carousel__slide">
+                        <label for="slide-2">Age Graph</label>
+                        <canvas id="age-graph-carousel"></canvas>
+                    </li>
+                    <li class="carousel__slide">
+                        <label for="slide-3">Gender Graph</label>
+                        <canvas id="gender-graph-carousel"></canvas>
+                    </li>
+                    <li class="carousel__slide">
+                        <label for="slide-4">Race Graph</label>
+                        <canvas id="race-graph-carousel"></canvas>
+                    </li>
+                </ul>
+                <ul class="carousel__thumbnails">
+                    <li><label for="slide-1">Mood</label></li>
+                    <li><label for="slide-2">Age</label></li>
+                    <li><label for="slide-3">Gender</label></li>
+                    <li><label for="slide-4">Race</label></li>
+                </ul>
+            </div>
+        </div>
+    </section>
+    <script src="static/js/main.js"></script>
+</body>
+</html>

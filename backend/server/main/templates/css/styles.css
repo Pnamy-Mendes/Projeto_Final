@@ -1,0 +1,158 @@
+body {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    height: 100vh;
+    margin: 0;
+    font-family: Arial, sans-serif;
+}
+
+#container {
+    display: flex;
+}
+
+#video-container, #graph-container {
+    width: 640px;
+    height: 480px;
+}
+
+#graph-container {
+    margin-left: 20px;
+}
+
+video {
+    width: 100%;
+    height: 100%;
+}
+
+#predictions {
+    margin-top: 10px;
+    font-size: 20px;
+}
+
+#predictions div {
+    margin-bottom: 5px;
+}
+
+#error {
+    color: red;
+    margin-top: 10px;
+}
+
+section {
+    margin-top: 100px;
+    padding: 50px 0;
+}
+
+.container {
+    max-width: 1044px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+.carousel {
+    display: block;
+    text-align: left;
+    position: relative;
+    margin-bottom: 22px;
+}
+
+.carousel input {
+    clip: rect(1px, 1px, 1px, 1px);
+    clip-path: inset(50%);
+    height: 1px;
+    width: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+}
+
+.carousel__slides {
+    position: relative;
+    z-index: 1;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    box-sizing: border-box;
+    display: flex;
+}
+
+.carousel__slide {
+    position: relative;
+    display: block;
+    flex: 1 0 100%;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    transition: all 300ms ease-out;
+    vertical-align: top;
+    box-sizing: border-box;
+    white-space: normal;
+}
+
+.carousel__slide figure {
+    display: flex;
+    margin: 0;
+}
+
+.carousel__slide div {
+    position: relative;
+    width: 100%;
+    padding-top: 66.66%;
+}
+
+.carousel__slide img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.carousel__slide figcaption {
+    align-self: flex-end;
+    padding: 20px 20px 0 20px;
+    flex: 0 0 auto;
+    width: 25%;
+    min-width: 150px;
+}
+
+.carousel__thumbnails {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+}
+
+.carousel__thumbnails li {
+    flex: 1 1 auto;
+    max-width: calc((100% / 4) - 20px);
+    margin: 0 10px;
+    transition: all 300ms ease-in-out;
+}
+
+.carousel__thumbnails label {
+    display: block;
+    position: relative;
+    width: 100%;
+    padding-top: 100%;
+}
+
+.carousel__thumbnails img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.prediction-graph {
+    display: none;
+}
