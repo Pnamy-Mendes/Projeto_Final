@@ -22,11 +22,12 @@ configure_git_identity() {
 configure_git_settings() {
     git config --global http.postBuffer 524288000  # 500MB
     git config --global http.maxRequestBuffer 100M
+    git config --global pull.rebase false  # Use merge strategy
 }
 
 # Function to get the current branch name
 get_current_branch() {
-    git branch --show-current 2>/dev/null || echo "Master"
+    git branch --show-current 2>/dev/null || echo "master"
 }
 
 # Function to initialize the git repository
@@ -48,13 +49,13 @@ update_repo() {
     echo "Fetching latest changes from remote..."
     git fetch origin "$(get_current_branch)"
     echo "Pulling latest changes from remote..."
-    git pull origin "$(get_current_branch)"
+    git pull origin "$(get_current_branch)" --allow-unrelated-histories
     echo "Adding all files to the repository..."
     git add .
     echo "Committing the changes..."
     git commit -m "Update project"
-    echo "Pushing changes to remote repository..."
-    git push origin "$(get_current_branch)"
+    echo "Force pushing changes to remote repository..."
+    git push --force origin "$(get_current_branch)"
 }
 
 # Function to clear Git cache for a specific file
@@ -71,11 +72,11 @@ clear_git_cache() {
 
 # Ensure cache file is in .gitignore
 echo "Ensuring cache file is in .gitignore..."
-echo "cache/UTK_age_gender_race/data_cache.npz" >> .gitignore
+echo "backend/cache/" >> .gitignore
 echo ".gitignore updated."
 
 # Clear cache file from Git index
-clear_git_cache "cache/UTK_age_gender_race/data_cache.npz"
+clear_git_cache "backend/cache/"
 
 # Check if the repository is already initialized
 if [ -d .git ]; then
