@@ -47,6 +47,6 @@ def split_cache(cache_path, output_dir, max_images_per_cache=1000):
     print("Cache splitting completed successfully.")
 
 # Example usage
-cache_path = 'cache/UTK_age_gender_race/data_cache.npz'  # Path to the existing cache file
+cache_path = 'cache/UTK_age_gender_race/split_cache/data_cache_1.npz'  # Path to the existing cache file
 output_dir = 'cache/UTK_age_gender_race/split_cache'    # Directory to save the split cache files
 split_cache(cache_path, output_dir)

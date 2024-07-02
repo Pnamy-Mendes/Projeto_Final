@@ -1,3 +1,4 @@
+# train_teacher_model.py
 import sys
 import os
 import numpy as np
@@ -41,7 +42,7 @@ data_dir = config['datasets']['age_gender_race_data']
 validation_split = config['validation_split']
 input_shape = config['model_params']['input_shape']
 batch_size = config['model_params']['batch_size']
-max_images = 5000  # Limit the number of images to avoid memory issues
+max_images = 1000  # Limit the number of images to avoid memory issues
 use_cache_only = True  # Load only cached images
 
 try:
@@ -60,10 +61,10 @@ def build_model(hp, output_type=None):
     input_shape_additional = (6,)  # Adjust according to the number of additional features
     num_races = 5
 
-    image_input = Input(shape=input_shape_images, name='image_input')
-    landmark_input = Input(shape=input_shape_landmarks, name='landmark_input')
-    features_input = Input(shape=input_shape_features, name='features_input')
-    additional_input = Input(shape=input_shape_additional, name='additional_input')
+    image_input = Input(shape=input_shape_images, name='image_input', dtype='float32')
+    landmark_input = Input(shape=input_shape_landmarks, name='landmark_input', dtype='float32')
+    features_input = Input(shape=input_shape_features, name='features_input', dtype='float32')
+    additional_input = Input(shape=input_shape_additional, name='additional_input', dtype='float32')
 
     # Enhanced model with more convolutional layers
     x = Conv2D(96, (7, 7), strides=(4, 4), padding='same', activation='relu')(image_input)
@@ -157,10 +158,10 @@ print(f"Hyperparameter tuning for race completed.")
 # Combine the best hyperparameters
 def build_age_gender_race_model(input_shape_images, input_shape_landmarks, input_shape_features, input_shape_additional, num_races):
     try:
-        image_input = Input(shape=input_shape_images, name='image_input')
-        landmark_input = Input(shape=input_shape_landmarks, name='landmark_input')
-        features_input = Input(shape=input_shape_features, name='features_input')
-        additional_input = Input(shape=input_shape_additional, name='additional_input')
+        image_input = Input(shape=input_shape_images, name='image_input', dtype='float32')
+        landmark_input = Input(shape=input_shape_landmarks, name='landmark_input', dtype='float32')
+        features_input = Input(shape=input_shape_features, name='features_input', dtype='float32')
+        additional_input = Input(shape=input_shape_additional, name='additional_input', dtype='float32')
 
         # Enhanced model with more convolutional layers
         x = Conv2D(96, (7, 7), strides=(4, 4), padding='same', activation='relu')(image_input)
