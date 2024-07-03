@@ -29,13 +29,18 @@ with open(config_path, 'r') as file:
     config = yaml.safe_load(file)
 
 # Ensure model directory exists
-model_dir = "./models/mood/models"
-if not os.path.exists(model_dir):
-    os.makedirs(model_dir)
+mood_model_dir = "./models/mood/models"
+age_gender_race_model_dir = "./models/age_gender_race/models"
+if not os.path.exists(mood_model_dir):
+    os.makedirs(mood_model_dir)
 
-# Load the trained teacher model
-teacher_model_path = os.path.join(model_dir, 'teacher_model.keras')
-teacher_model = tf.keras.models.load_model(teacher_model_path)
+# Load the trained mood model
+mood_model_path = os.path.join(mood_model_dir, 'teacher_model.keras')
+mood_model = tf.keras.models.load_model(mood_model_path)
+
+# Load the trained age, gender, race model
+age_gender_race_model_path = os.path.join(age_gender_race_model_dir, 'teacher_model_best.keras')
+age_gender_race_model = tf.keras.models.load_model(age_gender_race_model_path)
 
 # Initialize dlib's face detector
 detector = dlib.get_frontal_face_detector()
@@ -117,7 +122,7 @@ def preprocess_image(image_data):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         rects = detector(gray, 0)
         if len(rects) == 0:
-            return None, None, "No face detected"
+            return None, None, None, "No face detected"
         shape = predictor(gray, rects[0])
         landmarks = np.array([[p.x, p.y] for p in shape.parts()])
         image_resized = cv2.resize(image, (48, 48))
@@ -156,16 +161,42 @@ def predict_mood():
         features = extract_features(resized_image, landmarks)
         features = np.expand_dims(features.astype('float32') / 255.0, axis=0)
 
-        # Predict with the teacher model
-        image_expanded = np.expand_dims(resized_image.astype('float32') / 255.0, axis=0)
-        prediction = teacher_model.predict(image_expanded)
-        mood_idx = np.argmax(prediction[0])
-        mood = mood_label_map[mood_idx]
-        confidence = int(np.max(prediction[0]) * 100)
-        male_confidence = prediction[0][0] * 100  # Assuming male is the first class
-        female_confidence = prediction[0][1] * 100  # Assuming female is the second class
+        # Debug: Print the shapes of image and features
+        print(f"Shape of resized_image: {resized_image.shape}")
+        print(f"Shape of landmarks: {landmarks.shape}")
+        print(f"Shape of features: {features.shape}")
 
-        print(f"Prediction: {prediction[0]}, Mood: {mood}, Confidence: {confidence}")
+        # Predict with the mood model
+        image_expanded = np.expand_dims(resized_image.astype('float32') / 255.0, axis=0)
+        mood_prediction = mood_model.predict(image_expanded)
+        mood_idx = np.argmax(mood_prediction[0])
+        mood = mood_label_map[mood_idx]
+        mood_confidence = int(np.max(mood_prediction[0]) * 100)
+
+        # Prepare combined inputs for the age_gender_race model
+        image_flattened = resized_image.flatten()  # Correctly flatten the resized image
+        landmarks_flattened = landmarks.flatten()
+        combined_features = np.concatenate([
+            image_flattened,
+            landmarks_flattened,
+            features.flatten()
+        ])
+        combined_features = np.expand_dims(combined_features, axis=0)
+
+        # Debug: Print the shape of combined_features
+        print(f"Shape of combined_features: {combined_features.shape}")
+
+        # Predict with the age, gender, race model
+        age_gender_race_prediction = age_gender_race_model.predict(combined_features)
+        pred_age = age_gender_race_prediction[:, 0]
+        pred_gender = 'Male' if age_gender_race_prediction[:, 1] > 0.5 else 'Female'
+        pred_race_idx = np.argmax(age_gender_race_prediction[:, 2:], axis=1)
+        race_label_map = {0: "White", 1: "Black", 2: "Asian", 3: "Indian", 4: "Other"}
+        pred_race = race_label_map[pred_race_idx[0]]
+
+        # Debug: Print predictions
+        print(f"Mood Prediction: {mood_prediction[0]}, Mood: {mood}, Mood Confidence: {mood_confidence}")
+        print(f"Age, Gender, Race Prediction: {age_gender_race_prediction[0]}, Age: {pred_age}, Gender: {pred_gender}, Race: {pred_race}")
 
         # Draw landmarks on the original image
         image_with_landmarks = draw_landmarks(original_image.copy(), landmarks)
@@ -184,7 +215,10 @@ def predict_mood():
         history_data.append({
             'timestamp': timestamp,
             'mood': mood,
-            'confidence': confidence,
+            'mood_confidence': mood_confidence,
+            'age': float(pred_age),
+            'gender': pred_gender,
+            'race': pred_race,
             'image_path': f"results/result_{timestamp}.png"
         })
         with open(history_path, 'w') as f:
@@ -192,17 +226,16 @@ def predict_mood():
 
         return jsonify({
             'mood': mood,
-            'confidence_mood': confidence,
-            'age': None,  # Add age prediction if available
-            'gender': 'Male' if male_confidence > female_confidence else 'Female',
-            'race': None,  # Add race prediction if available
-            'image_path': f"/static/results/result_{timestamp}.png",
-            'male_confidence': male_confidence,
-            'female_confidence': female_confidence
+            'mood_confidence': mood_confidence,
+            'age': float(pred_age),
+            'gender': pred_gender,
+            'race': pred_race,
+            'image_path': f"/static/results/result_{timestamp}.png"
         })
     except Exception as e:
         print(f"Prediction error: {e}")
         return jsonify({'error': str(e)}), 500
+
 
 @app.route('/history', methods=['GET'])
 def history():

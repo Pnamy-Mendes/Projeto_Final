@@ -7,6 +7,7 @@ logging:
   file: project.log
   level: DEBUG
 model_params:
+  batch_size: 32
   dense_units_1: 256
   dense_units_2: 128
   dense_units_3: 64
@@ -21,7 +22,6 @@ model_params:
   n_classes: 7
   num_races: 5
   regularization_rate: 0.001
-  batch_size: 32  # Add this line to specify the batch size
 race_label_map:
   0: White
   1: Black
@@ -30,6 +30,6 @@ race_label_map:
   4: Others
 server:
   host: 0.0.0.0
-  port: 5000
+  port: 5003
 validation_split: 0.2
 version: '12.3'
