@@ -13,7 +13,6 @@ sys.path.append(backend_dir)
 
 try:
     from utils.age_gender_race_helpers import load_config, setup_tensorflow_gpu, data_loader
-    from utils.feature_extraction import extract_features
     print("Successfully imported modules.")
 except ModuleNotFoundError as e:
     print(f"ModuleNotFoundError: {e}")
@@ -33,12 +32,51 @@ tf.keras.mixed_precision.set_global_policy('mixed_float16')
 data_dir = config['datasets']['age_gender_race_data']
 validation_split = config['validation_split']
 input_shape = config['model_params']['input_shape']
-use_cache_only = False  # Load data from cache
+batch_size = config['model_params']['batch_size']
+max_images = 1000  # Limit the number of images to avoid memory issues
+use_cache_only = True  # Load only cached images
 
-train_data, val_data = data_loader(data_dir, validation_split, input_shape, config, use_cache_only=use_cache_only)
-x_val, y_val = val_data
+try:
+    train_gen, val_gen, steps_per_epoch_train, steps_per_epoch_val = data_loader(
+        data_dir, validation_split, input_shape, config, batch_size, max_images=max_images, use_cache_only=use_cache_only
+    )
+    print("Data loaded successfully.")
+except Exception as e:
+    print(f"Error loading data: {e}")
+    exit(1)
 
-y_val_age, y_val_gender, y_val_race = y_val
+def combine_data(generator):
+    combined_inputs_list = []
+    combined_targets_list = []
+    for batch_idx, batch in enumerate(generator):
+        print(f"Processing batch {batch_idx}")
+        print(f"Batch contents: {batch}")
+        inputs, targets = batch
+        print(f"Inputs: {inputs}")
+        print(f"Targets: {targets}")
+        if isinstance(inputs, (list, tuple)):
+            combined_inputs = tf.concat([tf.reshape(inputs[i], [inputs[i].shape[0], -1]) for i in range(len(inputs))], axis=1)
+        else:
+            combined_inputs = tf.reshape(inputs, [inputs.shape[0], -1])
+        
+        if isinstance(targets, (list, tuple)):
+            combined_targets = tf.concat([tf.reshape(targets[i], [targets[i].shape[0], -1]) for i in range(len(targets))], axis=1)
+        else:
+            combined_targets = tf.reshape(targets, [targets.shape[0], -1])
+        
+        combined_inputs_list.append(combined_inputs)
+        combined_targets_list.append(combined_targets)
+        
+    return tf.concat(combined_inputs_list, axis=0), tf.concat(combined_targets_list, axis=0)
+
+# Convert generator to list to handle it properly
+val_data_combined = list(val_gen)
+x_val_combined, y_val_combined = combine_data(val_data_combined)
+
+# Split y_val_combined into separate labels
+y_val_age = y_val_combined[:, 0]
+y_val_gender = y_val_combined[:, 1]
+y_val_race = y_val_combined[:, 2:]
 
 # Load the trained model
 checkpoint_dir = os.path.join(backend_dir, 'models', 'age_gender_race', 'models')
@@ -46,13 +84,10 @@ model_path = os.path.join(checkpoint_dir, 'teacher_model_final.keras')
 model = tf.keras.models.load_model(model_path)
 
 # Make predictions
-predictions = model.predict([x_val[0], x_val[1], x_val[2]])
-pred_age, pred_gender, pred_race = predictions
-
-# Convert predictions to appropriate formats
-pred_age = np.squeeze(pred_age)
-pred_gender = np.round(np.squeeze(pred_gender)).astype(int)
-pred_race = np.argmax(pred_race, axis=1)
+predictions = model.predict(x_val_combined)
+pred_age = predictions[:, 0]
+pred_gender = np.round(predictions[:, 1]).astype(int)
+pred_race = np.argmax(predictions[:, 2:], axis=1)
 
 # Calculate mean absolute error for age
 age_mae = mean_absolute_error(y_val_age, pred_age)
