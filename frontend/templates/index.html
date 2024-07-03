@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Webcam Mood and Demographics Prediction</title>
+    <link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='css/styles.css') }}">
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>Navigation</h2>
+        <a href="/">Home</a>
+        <a href="/load_picture">Load Picture</a>
+        <a href="/train_model">Train Model</a>
+    </div>
+    <div class="content">
+        <h1>Webcam Mood and Demographics Prediction</h1>
+        <div id="container">
+            <div id="video-container">
+                <video id="webcam" autoplay playsinline></video>
+                <div>
+                    <select id="camera-select"></select>
+                    <button id="toggle-button">Start Prediction</button>
+                </div>
+                <div id="predictions">
+                    <div id="mood">Mood: Unknown</div>
+                    <div id="age">Age: Unknown</div>
+                    <div id="gender">Gender: Unknown</div>
+                    <div id="race">Race: Unknown</div>
+                </div>
+                <div id="error"></div>
+            </div>
+            <div id="graph-container">
+                <canvas id="mood-graph" class="prediction-graph"></canvas>
+                <canvas id="age-graph" class="prediction-graph"></canvas>
+                <canvas id="gender-graph" class="prediction-graph"></canvas>
+                <canvas id="race-graph" class="prediction-graph"></canvas>
+            </div>
+        </div>
+        <section>
+            <div class="container">
+                <div class="carousel">
+                    <input type="radio" name="slides" checked="checked" id="slide-1">
+                    <input type="radio" name="slides" id="slide-2">
+                    <input type="radio" name="slides" id="slide-3">
+                    <input type="radio" name="slides" id="slide-4">
+                    <input type="radio" name="slides" id="slide-5">
+                    <input type="radio" name="slides" id="slide-6">
+                    <ul class="carousel__slides">
+                        <!-- Dynamic slides will be inserted here -->
+                    </ul>
+                    <ul class="carousel__thumbnails">
+                        <!-- Dynamic thumbnails will be inserted here -->
+                    </ul>
+                </div>
+            </div>
+        </section>
+    </div>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>
