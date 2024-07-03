@@ -123,12 +123,6 @@ def extract_additional_features(image, landmarks):
     features.extend(eyebrow_heights)
 
     # Ensure the length of features is consistent
-    target_length = 10  # Adjusted to ensure consistent length
-    if len(features) < target_length:
-        features.extend([0] * (target_length - len(features)))
-    elif len(features) > target_length:
-        features = features[:target_length]
-
     return np.array(features)
 
 def extract_features(image_path, config):
@@ -145,15 +139,8 @@ def extract_features(image_path, config):
         skin_texture = extract_skin_texture(image, landmarks)
         features = np.concatenate([hair_color, face_structure, additional_features, [symmetry, skin_texture]], axis=0)
         
-        # Ensure features array has a consistent length
-        target_length = 18  # Updated to match input shape in model
-        if len(features) < target_length:
-            features = np.pad(features, (0, target_length - len(features)), 'constant', constant_values=-1)
-        elif len(features) > target_length:
-            features = features[:target_length]
-
         logging.debug(f"Extracted features for {image_path}: {features}")
         return image, landmarks, features
     except Exception as e:
         logging.error(f"Error extracting features: {e}")
-        return np.zeros((256, 256, 3), dtype=np.float32), np.zeros((68, 2), dtype=np.float32), np.full(target_length, -1)
+        return np.zeros((256, 256, 3), dtype=np.float32), np.zeros((68, 2), dtype=np.float32), np.full(13, -1)

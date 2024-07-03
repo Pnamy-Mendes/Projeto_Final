@@ -39,7 +39,7 @@ mood_model_path = os.path.join(mood_model_dir, 'teacher_model.keras')
 mood_model = tf.keras.models.load_model(mood_model_path)
 
 # Load the trained age, gender, race model
-age_gender_race_model_path = os.path.join(age_gender_race_model_dir, 'teacher_model_best.keras')
+age_gender_race_model_path = os.path.join(age_gender_race_model_dir, 'age_gender_race_model_final.keras')
 age_gender_race_model = tf.keras.models.load_model(age_gender_race_model_path)
 
 # Initialize dlib's face detector
@@ -106,7 +106,7 @@ def extract_features(image, landmarks):
     features = additional_features + mouth_shape_one_hot.tolist()
 
     # Ensure features have the same length as expected by the model (pad if necessary)
-    feature_length = 256  # Example feature length, update if needed
+    feature_length = 14  # Updated feature length to 14
     if len(features) < feature_length:
         features += [0] * (feature_length - len(features))
     elif len(features) > feature_length:
@@ -173,30 +173,32 @@ def predict_mood():
         mood = mood_label_map[mood_idx]
         mood_confidence = int(np.max(mood_prediction[0]) * 100)
 
-        # Prepare combined inputs for the age_gender_race model
-        image_flattened = resized_image.flatten()  # Correctly flatten the resized image
-        landmarks_flattened = landmarks.flatten()
-        combined_features = np.concatenate([
-            image_flattened,
-            landmarks_flattened,
-            features.flatten()
-        ])
-        combined_features = np.expand_dims(combined_features, axis=0)
+        # Resize image to (256, 256, 3) for age_gender_race model
+        resized_image_for_age_gender_race = cv2.resize(resized_image, (256, 256))
+
+        # Prepare inputs for the age_gender_race model
+        image_expanded_for_age_gender_race = np.expand_dims(resized_image_for_age_gender_race, axis=0)
+        landmarks_expanded = np.expand_dims(landmarks, axis=0)
 
         # Debug: Print the shape of combined_features
-        print(f"Shape of combined_features: {combined_features.shape}")
+        print(f"Shape of image_expanded_for_age_gender_race: {image_expanded_for_age_gender_race.shape}")
+        print(f"Shape of landmarks_expanded: {landmarks_expanded.shape}")
+        print(f"Shape of features: {features.shape}")
 
         # Predict with the age, gender, race model
-        age_gender_race_prediction = age_gender_race_model.predict(combined_features)
-        pred_age = age_gender_race_prediction[:, 0]
-        pred_gender = 'Male' if age_gender_race_prediction[:, 1] > 0.5 else 'Female'
-        pred_race_idx = np.argmax(age_gender_race_prediction[:, 2:], axis=1)
+        age_gender_race_prediction = age_gender_race_model.predict([image_expanded_for_age_gender_race, landmarks_expanded, features])
+        
+        pred_age = age_gender_race_prediction[0][0]
+        pred_gender = 'Male' if age_gender_race_prediction[1][0] > 0.5 else 'Female'
+        pred_race_idx = np.argmax(age_gender_race_prediction[2][0])
         race_label_map = {0: "White", 1: "Black", 2: "Asian", 3: "Indian", 4: "Other"}
-        pred_race = race_label_map[pred_race_idx[0]]
+        pred_race = race_label_map[pred_race_idx]
 
         # Debug: Print predictions
         print(f"Mood Prediction: {mood_prediction[0]}, Mood: {mood}, Mood Confidence: {mood_confidence}")
-        print(f"Age, Gender, Race Prediction: {age_gender_race_prediction[0]}, Age: {pred_age}, Gender: {pred_gender}, Race: {pred_race}")
+        print(f"Age Prediction: {pred_age}")
+        print(f"Gender Prediction: {pred_gender}")
+        print(f"Race Prediction: {pred_race}")
 
         # Draw landmarks on the original image
         image_with_landmarks = draw_landmarks(original_image.copy(), landmarks)
@@ -237,6 +239,7 @@ def predict_mood():
         return jsonify({'error': str(e)}), 500
 
 
+
 @app.route('/history', methods=['GET'])
 def history():
     try:
@@ -272,3 +275,4 @@ if __name__ == '__main__':
         yaml.safe_dump(config, file)
 
     app.run(host=config['server']['host'], port=available_port, debug=True)
+

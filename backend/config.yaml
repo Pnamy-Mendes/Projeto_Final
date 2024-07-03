@@ -30,6 +30,6 @@ race_label_map:
   4: Others
 server:
   host: 0.0.0.0
-  port: 5003
+  port: 5004
 validation_split: 0.2
 version: '12.3'

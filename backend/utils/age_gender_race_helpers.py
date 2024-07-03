@@ -1,3 +1,4 @@
+# utils/age_gender_race_helpers.py
 import yaml
 import tensorflow as tf
 import numpy as np
@@ -5,7 +6,7 @@ import cv2
 import os
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
-from utils.feature_extraction import detect_landmarks, extract_hair_color, extract_face_structure, extract_additional_features
+from utils.feature_extraction import detect_landmarks, extract_hair_color, extract_face_structure, extract_additional_features, extract_features
 
 def load_config(config_file):
     with open(config_file, 'r') as file:
@@ -38,22 +39,25 @@ def parse_label_from_filename(filename):
         print(f"Error parsing label from filename {filename}: {e}")
         return -1, -1, -1
 
+def save_cache(cached_image_paths, cached_data, cache_dir):
+    cache_path = os.path.join(cache_dir, 'data_cache.npz')
+    np.savez_compressed(cache_path, image_paths=np.array(cached_image_paths), data=np.array(cached_data, dtype=object))
+    print(f"Cache saved at {cache_path}")
+
 def load_split_cache(cache_dir):
     cached_image_paths = []
     cached_data = []
 
-    cache_files = sorted([f for f in os.listdir(cache_dir) if f.startswith('data_cache_') and f.endswith('.npz')])
-
-    for cache_file in cache_files:
-        cache_path = os.path.join(cache_dir, cache_file)
-        print(f"Loading data from {cache_path}...")
-        cached = np.load(cache_path, allow_pickle=True)
+    cache_file = os.path.join(cache_dir, 'data_cache.npz')
+    if os.path.exists(cache_file):
+        print(f"Loading data from {cache_file}...")
+        cached = np.load(cache_file, allow_pickle=True)
         cached_image_paths.extend(cached['image_paths'].tolist())
         cached_data.extend(cached['data'].tolist())
 
     return cached_image_paths, cached_data
 
-def data_loader(data_dir, validation_split, input_shape, config, batch_size, max_images=None, use_cache_only=False):
+def data_loader(data_dir, validation_split, input_shape, config, batch_size=32, max_images=None, use_cache_only=False):
     cache_dir = os.path.join('cache', 'UTK_age_gender_race', 'split_cache')
     os.makedirs(cache_dir, exist_ok=True)
 
@@ -116,15 +120,8 @@ def data_loader(data_dir, validation_split, input_shape, config, batch_size, max
                     'race': race
                 })
 
-                if idx > 0 and idx % 250 == 0:
-                    split_idx = len(cached_image_paths) // 1000
-                    split_cache_path = os.path.join(cache_dir, f'data_cache_{split_idx}.npz')
-                    np.savez_compressed(split_cache_path, image_paths=np.array(cached_image_paths), data=np.array(cached_data, dtype=object))
-                    print(f"Cache saved at {split_cache_path}")
-
-                    # Clear lists to save memory
-                    cached_image_paths = cached_image_paths[-1000:]
-                    cached_data = cached_data[-1000:]
+                if (idx + 1) % 250 == 0:
+                    save_cache(cached_image_paths, cached_data, cache_dir)
 
         except Exception as e:
             print(f"Error extracting features for {image_path}: {e}")
@@ -156,24 +153,34 @@ def data_loader(data_dir, validation_split, input_shape, config, batch_size, max
     combined_outputs = np.column_stack((ages, genders, races))
 
     print("Shapes of datasets before splitting:")
-    print(f"Combined Inputs: {combined_features.shape}")
-    print(f"Combined Outputs: {combined_outputs.shape}")
+    print(f"Images: {images.shape}")
+    print(f"Features: {features.shape}")
+    print(f"Ages: {ages.shape}")
+    print(f"Genders: {genders.shape}")
+    print(f"Races: {races.shape}")
 
-    x_train, x_val, y_train, y_val = train_test_split(
-        combined_features, combined_outputs, test_size=validation_split, random_state=42
+    x_train_img, x_val_img, x_train_features, x_val_features, y_train, y_val = train_test_split(
+        images, features, combined_outputs, test_size=validation_split, random_state=42
     )
 
+    y_train_age = y_train[:, 0]
+    y_train_gender = y_train[:, 1]
+    y_train_race = y_train[:, 2]
+    
+    y_val_age = y_val[:, 0]
+    y_val_gender = y_val[:, 1]
+    y_val_race = y_val[:, 2]
+
     print("Shapes of datasets after splitting:")
-    print(f"x_train: {x_train.shape}")
-    print(f"x_val: {x_val.shape}")
+    print(f"x_train_img: {x_train_img.shape}")
+    print(f"x_val_img: {x_val_img.shape}")
+    print(f"x_train_features: {x_train_features.shape}")
+    print(f"x_val_features: {x_val_features.shape}")
     print(f"y_train: {y_train.shape}")
     print(f"y_val: {y_val.shape}")
 
-    # Save updated cache
+    # Save final cache
     if len(cached_image_paths) > 0:
-        split_idx = len(cached_image_paths) // 1000
-        split_cache_path = os.path.join(cache_dir, f'data_cache_{split_idx}.npz')
-        np.savez_compressed(split_cache_path, image_paths=np.array(cached_image_paths), data=np.array(cached_data, dtype=object))
-        print(f"Final cache saved at {split_cache_path}")
+        save_cache(cached_image_paths, cached_data, cache_dir)
 
-    return x_train, x_val, y_train, y_val
+    return (x_train_img, x_train_features, y_train_age, y_train_gender, y_train_race), (x_val_img, x_val_features, y_val_age, y_val_gender, y_val_race)

@@ -187,16 +187,16 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (result.error) {
                     throw new Error(result.error);
                 }
-                const { mood, confidence_mood, age, gender, race, image_path } = result;
-                moodDisplay.textContent = `Mood: ${mood} (${confidence_mood}%)`;
-                moodDisplay.style.color = confidence_mood > 70 ? 'green' : confidence_mood > 40 ? 'yellow' : 'red';
+                const { mood, mood_confidence, age, gender, race, image_path } = result;
+                moodDisplay.textContent = `Mood: ${mood} (${mood_confidence}%)`;
+                moodDisplay.style.color = mood_confidence > 70 ? 'green' : mood_confidence > 40 ? 'yellow' : 'red';
                 ageDisplay.textContent = `Age: ${age}`;
                 genderDisplay.textContent = `Gender: ${gender}`;
                 raceDisplay.textContent = `Race: ${race}`;
-                updateGraph(moodChart, confidence_mood);
+                updateGraph(moodChart, mood_confidence);
                 updateGraph(ageChart, age);
-                updateGraph(genderChart, confidence_mood); // Adjust based on your needs
-                updateGraph(raceChart, confidence_mood);  // Adjust based on your needs
+                updateGraph(genderChart, gender === 'Male' ? 100 : 0); // Simplified gender confidence for visualization
+                updateGraph(raceChart, raceConfidence(race)); // Simplified race confidence for visualization
             } catch (error) {
                 errorDisplay.textContent = `Error: ${error.message}`;
             }
@@ -214,14 +214,25 @@ document.addEventListener("DOMContentLoaded", () => {
                 throw new Error(result.error);
             }
             result.history.forEach(item => {
-                updateGraph(moodChart, item.confidence_mood);
+                updateGraph(moodChart, item.mood_confidence);
                 updateGraph(ageChart, item.age);
-                updateGraph(genderChart, item.confidence_mood); // Adjust based on your needs
-                updateGraph(raceChart, item.confidence_mood);  // Adjust based on your needs
+                updateGraph(genderChart, item.gender === 'Male' ? 100 : 0); // Simplified gender confidence for visualization
+                updateGraph(raceChart, raceConfidence(item.race)); // Simplified race confidence for visualization
             });
         } catch (error) {
             console.error(`Error loading history: ${error.message}`);
         }
+    }
+
+    function raceConfidence(race) {
+        const raceMap = {
+            'White': 100,
+            'Black': 80,
+            'Asian': 60,
+            'Indian': 40,
+            'Other': 20
+        };
+        return raceMap[race] || 0;
     }
 
     loadHistory();

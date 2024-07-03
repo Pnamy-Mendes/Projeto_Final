@@ -47,11 +47,11 @@ data_dir = config['datasets']['age_gender_race_data']
 validation_split = config['validation_split']
 input_shape = config['model_params']['input_shape']
 batch_size = config['model_params']['batch_size']
-max_images = 2000  # Limit the number of images to avoid memory issues
+max_images = 5000  # Limit the number of images to avoid memory issues
 use_cache_only = True  # Load only cached images
 
 try:
-    x_train, x_val, y_train, y_val = data_loader(
+    (x_train_img, x_train_features, y_train_age, y_train_gender, y_train_race), (x_val_img, x_val_features, y_val_age, y_val_gender, y_val_race) = data_loader(
         data_dir, validation_split, input_shape, config, batch_size, max_images=max_images, use_cache_only=use_cache_only
     )
     print("Data loaded successfully.")
@@ -59,50 +59,52 @@ except Exception as e:
     print(f"Error loading data: {e}")
     exit(1)
 
-def create_dataset(x, y, batch_size):
-    dataset = tf.data.Dataset.from_tensor_slices((x, y))
-    dataset = dataset.shuffle(buffer_size=len(x)).batch(batch_size)
+def create_dataset(x_img, x_features, y_age, y_gender, y_race, batch_size):
+    dataset = tf.data.Dataset.from_tensor_slices(({'image_input': x_img, 'feature_input': x_features}, {'age_output': y_age, 'gender_output': y_gender, 'race_output': y_race}))
+    dataset = dataset.shuffle(buffer_size=len(x_img)).batch(batch_size)
     return dataset
 
-train_dataset = create_dataset(x_train, y_train, batch_size)
-val_dataset = create_dataset(x_val, y_val, batch_size)
+train_dataset = create_dataset(x_train_img, x_train_features, y_train_age, y_train_gender, y_train_race, batch_size)
+val_dataset = create_dataset(x_val_img, x_val_features, y_val_age, y_val_gender, y_val_race, batch_size)
 
 def build_model(hp, output_units, name):
-    input_shape_combined = (x_train.shape[1],)
-    combined_input = Input(shape=input_shape_combined, name='combined_input', dtype='float32')
+    img_input_shape = x_train_img.shape[1:]
+    feature_input_shape = x_train_features.shape[1:]
 
-    # Extract the image part from the combined input
-    img_flat_size = 256 * 256 * 3
+    image_input = Input(shape=img_input_shape, name='image_input')
+    feature_input = Input(shape=feature_input_shape, name='feature_input')
 
-    x = Reshape((256, 256, 3))(combined_input[:, :img_flat_size])
-    features = combined_input[:, img_flat_size:]
-
-    # Model layers
-    x = Conv2D(96, (7, 7), strides=(4, 4), padding='same', activation='relu')(x)
-    x = MaxPooling2D((3, 3), strides=(2, 2))(x)
-    x = Conv2D(256, (5, 5), padding='same', activation='relu')(x)
-    x = MaxPooling2D((3, 3), strides=(2, 2))(x)
-    x = Conv2D(384, (3, 3), padding='same', activation='relu')(x)
-    x = MaxPooling2D((3, 3), strides=(2, 2))(x)
+    # Simplified model layers
+    x = Conv2D(32, (3, 3), strides=(1, 1), padding='same', activation='relu')(image_input)
+    x = MaxPooling2D((2, 2), strides=(2, 2))(x)
+    x = Conv2D(64, (3, 3), padding='same', activation='relu')(x)
+    x = MaxPooling2D((2, 2), strides=(2, 2))(x)
     x = GlobalAveragePooling2D()(x)
 
-    concatenated_features = Concatenate(name='concatenate_features')([x, features])
+    concatenated_features = Concatenate(name='concatenate_features')([x, feature_input])
 
-    dense_concat = Dense(hp.Int('dense_units', min_value=128, max_value=512, step=64), activation='relu', name='dense_concat')(concatenated_features)
+    dense_concat = Dense(hp.Int('dense_units', min_value=64, max_value=256, step=64), activation='relu', name='dense_concat')(concatenated_features)
     dropout = Dropout(hp.Float('dropout', min_value=0.2, max_value=0.5, step=0.1), name='dropout_concat')(dense_concat)
     batch_norm = BatchNormalization(name='batch_norm_concat')(dropout)
 
-    final_output = Dense(output_units, name=f'final_output_{name}', dtype=tf.float32)(batch_norm)
+    if name == 'age':
+        final_output = Dense(output_units, name=f'final_output_{name}', dtype=tf.float32)(batch_norm)
+        loss = 'mse'
+        metrics = ['mae']
+    else:
+        final_output = Dense(output_units, activation='softmax', name=f'final_output_{name}', dtype=tf.float32)(batch_norm)
+        loss = 'sparse_categorical_crossentropy'
+        metrics = ['accuracy']
 
-    model = Model(inputs=combined_input, outputs=final_output)
+    model = Model(inputs=[image_input, feature_input], outputs=final_output)
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=hp.Choice('learning_rate', values=[1e-3, 1e-4, 1e-5])),
-        loss='mse' if name == 'age' else 'sparse_categorical_crossentropy',
-        metrics=['mae' if name == 'age' else 'accuracy']
+        loss=loss,
+        metrics=metrics
     )
     return model
 
-def tune_and_train_model(name, output_units, epochs=20, max_trials=10):
+def tune_and_train_model(name, output_units, y_train, y_val, epochs=10, max_trials=5):
     print(f"Starting hyperparameter tuning for {name}")
     tuner = kt.Hyperband(
         lambda hp: build_model(hp, output_units, name),
@@ -112,11 +114,11 @@ def tune_and_train_model(name, output_units, epochs=20, max_trials=10):
         directory='hyperband_teacher',
         project_name=f'{name}_tuning'
     )
-    stop_early = EarlyStopping(monitor='val_loss', patience=5, mode='min')
+    stop_early = EarlyStopping(monitor='val_loss', patience=3, mode='min')
     tuner.search(
-        train_dataset, 
+        train_dataset.map(lambda x, y: (x, y[name + '_output'])), 
         epochs=epochs, 
-        validation_data=val_dataset, 
+        validation_data=val_dataset.map(lambda x, y: (x, y[name + '_output'])), 
         callbacks=[stop_early]
     )
     best_hps = tuner.get_best_hyperparameters(num_trials=1)[0]
@@ -124,38 +126,31 @@ def tune_and_train_model(name, output_units, epochs=20, max_trials=10):
 
     model = build_model(best_hps, output_units, name)
     model.fit(
-        train_dataset, 
-        epochs=100, 
-        validation_data=val_dataset, 
-        callbacks=[stop_early, ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=5, min_lr=1e-6)]
+        train_dataset.map(lambda x, y: (x, y[name + '_output'])), 
+        epochs=30, 
+        validation_data=val_dataset.map(lambda x, y: (x, y[name + '_output'])), 
+        callbacks=[stop_early, ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=3, min_lr=1e-6)]
     )
     return model, best_hps
 
 # Tuning for age, gender, and race separately
-age_model, age_hps = tune_and_train_model('age', 1)
-gender_model, gender_hps = tune_and_train_model('gender', 2)
-race_model, race_hps = tune_and_train_model('race', 5)
+age_model, age_hps = tune_and_train_model('age', 1, y_train_age, y_val_age)
+gender_model, gender_hps = tune_and_train_model('gender', 2, y_train_gender, y_val_gender)
+race_model, race_hps = tune_and_train_model('race', 5, y_train_race, y_val_race)
 
 # Combined model building with best hyperparameters
-def build_combined_model(input_shape_combined, age_hps, gender_hps, race_hps):
-    combined_input = Input(shape=input_shape_combined, name='combined_input', dtype='float32')
-
-    # Extract the image part from the combined input
-    img_flat_size = 256 * 256 * 3
-
-    x = Reshape((256, 256, 3))(combined_input[:, :img_flat_size])
-    features = combined_input[:, img_flat_size:]
+def build_combined_model(img_input_shape, feature_input_shape, age_hps, gender_hps, race_hps):
+    image_input = Input(shape=img_input_shape, name='image_input')
+    feature_input = Input(shape=feature_input_shape, name='feature_input')
 
     # Shared convolutional base
-    x = Conv2D(96, (7, 7), strides=(4, 4), padding='same', activation='relu')(x)
-    x = MaxPooling2D((3, 3), strides=(2, 2))(x)
-    x = Conv2D(256, (5, 5), padding='same', activation='relu')(x)
-    x = MaxPooling2D((3, 3), strides=(2, 2))(x)
-    x = Conv2D(384, (3, 3), padding='same', activation='relu')(x)
-    x = MaxPooling2D((3, 3), strides=(2, 2))(x)
+    x = Conv2D(32, (3, 3), strides=(1, 1), padding='same', activation='relu')(image_input)
+    x = MaxPooling2D((2, 2), strides=(2, 2))(x)
+    x = Conv2D(64, (3, 3), padding='same', activation='relu')(x)
+    x = MaxPooling2D((2, 2), strides=(2, 2))(x)
     x = GlobalAveragePooling2D()(x)
 
-    concatenated_features = Concatenate(name='concatenate_features')([x, features])
+    concatenated_features = Concatenate(name='concatenate_features')([x, feature_input])
 
     # Age branch
     age_dense = Dense(age_hps.get('dense_units'), activation='relu', name='age_dense')(concatenated_features)
@@ -175,7 +170,7 @@ def build_combined_model(input_shape_combined, age_hps, gender_hps, race_hps):
     race_batch_norm = BatchNormalization(name='race_batch_norm')(race_dropout)
     race_output = Dense(5, activation='softmax', name='race_output', dtype=tf.float32)(race_batch_norm)
 
-    model = Model(inputs=combined_input, outputs=[age_output, gender_output, race_output])
+    model = Model(inputs=[image_input, feature_input], outputs=[age_output, gender_output, race_output])
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
         loss=['mse', 'sparse_categorical_crossentropy', 'sparse_categorical_crossentropy'],
@@ -184,7 +179,8 @@ def build_combined_model(input_shape_combined, age_hps, gender_hps, race_hps):
     return model
 
 combined_model = build_combined_model(
-    input_shape_combined=(x_train.shape[1],),
+    img_input_shape=x_train_img.shape[1:],
+    feature_input_shape=x_train_features.shape[1:],
     age_hps=age_hps,
     gender_hps=gender_hps,
     race_hps=race_hps

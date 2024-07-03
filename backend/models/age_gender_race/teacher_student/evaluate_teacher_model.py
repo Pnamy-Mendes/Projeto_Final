@@ -1,13 +1,11 @@
-# backend/models/age_gender_race/teacher_student/evaluate_teacher_model.py
 import sys
 import os
 import numpy as np
 import tensorflow as tf
 from sklearn.metrics import accuracy_score, mean_absolute_error, classification_report, confusion_matrix
 import cv2
-import pandas as pd
 import dlib
-import keras_tuner as kt
+import logging
 
 # Adjust the backend directory import
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -16,6 +14,7 @@ sys.path.append(backend_dir)
 
 try:
     from utils.age_gender_race_helpers import load_config, setup_tensorflow_gpu
+    from utils.feature_extraction import extract_features
     print("Successfully imported modules.")
 except ModuleNotFoundError as e:
     print(f"ModuleNotFoundError: {e}")
@@ -36,42 +35,21 @@ detector = dlib.get_frontal_face_detector()
 predictor_path = config['datasets']['predictor_path']
 predictor = dlib.shape_predictor(predictor_path)
 
-def build_model(hp):
-    inputs = tf.keras.Input(shape=(196626,))
-    x = tf.keras.layers.Dense(units=hp.Int('units', min_value=32, max_value=512, step=32), activation='relu')(inputs)
-    x = tf.keras.layers.Dropout(hp.Float('dropout', min_value=0.0, max_value=0.5, step=0.1))(x)
-    outputs = tf.keras.layers.Dense(3, activation='softmax')(x)
-    model = tf.keras.Model(inputs=inputs, outputs=outputs)
-    
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(hp.Float('learning_rate', min_value=1e-4, max_value=1e-2, sampling='LOG')),
-        loss='sparse_categorical_crossentropy',
-        metrics=['accuracy']
-    )
-    return model
-
-# Load the best model from Keras Tuner
-tuner_dir = os.path.join(backend_dir, 'hyperband_teacher')
-tuner = kt.Hyperband(
-    hypermodel=build_model,  # Pass the model building function here
-    objective='val_loss',
-    max_epochs=10,
-    factor=3,
-    directory=tuner_dir,
-    project_name='combined_tuning'
-)
-tuner.reload()
-best_model = tuner.get_best_models(num_models=1)[0]
+# Load the combined model
+model_path = os.path.join(backend_dir, 'models', 'age_gender_race', 'models', 'teacher_model_best.keras')
+combined_model = tf.keras.models.load_model(model_path)
 
 def preprocess_image(image_path):
     image = cv2.imread(image_path)
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    rects = detector(gray, 0)
+    if image is None:
+        return None, None, "Image not found or unable to load"
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+    rects = detector(image_rgb, 0)
     if len(rects) == 0:
         return None, None, "No face detected"
-    shape = predictor(gray, rects[0])
+    shape = predictor(image_rgb, rects[0])
     landmarks = np.array([[p.x, p.y] for p in shape.parts()])
-    image_resized = cv2.resize(image, (256, 256))
+    image_resized = cv2.resize(image_rgb, (256, 256))
     return image_resized, landmarks, None
 
 def load_images_from_folder(folder, max_images=None):
@@ -96,26 +74,40 @@ def evaluate_model(model, image_paths, labels):
     race_predictions = []
     valid_labels = []
 
+    gender_count = np.zeros(2)
+    gender_correct_count = np.zeros(2)
+    race_count = np.zeros(5)
+    race_correct_count = np.zeros(5)
+
     for image_path, label in zip(image_paths, labels):
         image, landmarks, error = preprocess_image(image_path)
         if error:
             print(f"Error processing {image_path}: {error}")
             continue
-        features = extract_features(image, landmarks)
-        combined_features = np.concatenate([image.flatten(), landmarks.flatten(), features])
-        combined_features = np.expand_dims(combined_features, axis=0)
+        if landmarks is None or len(landmarks) == 0 or np.any(landmarks == 0):
+            print(f"Invalid landmarks for {image_path}. Skipping...")
+            continue
+        _, _, features = extract_features(image_path, config)
+        features = np.expand_dims(features, axis=0)
+
+        prediction = model.predict([np.expand_dims(image, axis=0), features])
         
-        if combined_features.shape[1] < 196626:
-            padding = np.zeros((combined_features.shape[0], 196626 - combined_features.shape[1]))
-            combined_features = np.concatenate([combined_features, padding], axis=1)
-        elif combined_features.shape[1] > 196626:
-            combined_features = combined_features[:, :196626]
+        print(f"Predictions for {image_path}: Age={prediction[0][0][0]}, Gender={prediction[1][0]}, Race={prediction[2][0]}")
         
-        prediction = model.predict(combined_features)
-        age_predictions.append(prediction[0][0])
-        gender_pred = np.round(prediction[0][1]).astype(int)
-        gender_predictions.append(min(max(gender_pred, 0), 1))  # Constrain to 0 or 1
-        race_predictions.append(np.argmax(prediction[0][2:]))
+        age_predictions.append(prediction[0][0][0])
+        gender_pred = np.argmax(prediction[1][0])
+        race_pred = np.argmax(prediction[2][0])
+
+        gender_count[gender_pred] += 1
+        race_count[race_pred] += 1
+
+        if gender_pred == label[1]:
+            gender_correct_count[gender_pred] += 1
+        if race_pred == label[2]:
+            race_correct_count[race_pred] += 1
+
+        gender_predictions.append(gender_pred)
+        race_predictions.append(race_pred)
         valid_labels.append(label)
 
     valid_labels = np.array(valid_labels)
@@ -145,29 +137,16 @@ def evaluate_model(model, image_paths, labels):
     print("\nConfusion Matrix for Race:\n", confusion_matrix(y_val_race, race_predictions))
     print("\nConfusion Matrix for Gender:\n", confusion_matrix(y_val_gender, gender_predictions))
 
+    # Prediction counts
+    print("\nGender Prediction Counts:")
+    for i, count in enumerate(gender_count):
+        print(f"Gender {i}: Predicted {int(count)} times, Correct {int(gender_correct_count[i])} times")
+
+    print("\nRace Prediction Counts:")
+    for i, count in enumerate(race_count):
+        print(f"Race {i}: Predicted {int(count)} times, Correct {int(race_correct_count[i])} times")
+
     print("Evaluation completed.")
-
-def extract_features(image, landmarks):
-    # Calculate features
-    mouth_height = np.linalg.norm(landmarks[62] - landmarks[66])
-    mouth_width = np.linalg.norm(landmarks[60] - landmarks[64])
-    mouth_ratio = mouth_height / mouth_width if mouth_width != 0 else 0
-    eye_distance = np.linalg.norm(landmarks[36] - landmarks[45])
-    eyebrow_distance = np.linalg.norm(landmarks[19] - landmarks[24])
-    nose_length = np.linalg.norm(landmarks[27] - landmarks[33])
-    left_eye_ratio = np.linalg.norm(landmarks[37] - landmarks[41]) / np.linalg.norm(landmarks[36] - landmarks[39]) if np.linalg.norm(landmarks[36] - landmarks[39]) != 0 else 0
-    right_eye_ratio = np.linalg.norm(landmarks[43] - landmarks[47]) / np.linalg.norm(landmarks[42] - landmarks[45]) if np.linalg.norm(landmarks[42] - landmarks[45]) != 0 else 0
-    eye_ratio = (left_eye_ratio + right_eye_ratio) / 2
-
-    additional_features = [
-        mouth_height, mouth_width, mouth_ratio, eye_distance,
-        eyebrow_distance, nose_length, eye_ratio,
-        left_eye_ratio, right_eye_ratio,
-        np.linalg.norm(landmarks[39] - landmarks[42]),  # Interocular distance
-        np.linalg.norm(landmarks[31] - landmarks[35]),  # Nose width
-    ]
-
-    return np.array(additional_features)
 
 # Load images and labels
 data_dir = config['datasets']['age_gender_race_data']
@@ -175,4 +154,4 @@ max_images = 100  # Limit the number of images to evaluate
 image_paths, labels = load_images_from_folder(data_dir, max_images=max_images)
 
 # Evaluate the model
-evaluate_model(best_model, image_paths, labels)
+evaluate_model(combined_model, image_paths, labels)
