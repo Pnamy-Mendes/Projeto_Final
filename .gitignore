@@ -7,6 +7,7 @@ frontend/mood-prediction-app/node_modules/
 backend/cache/
 backend/hyperband_teacher/
 bbbackup_agr/
+frontend/static/results/
 
 # Ignore Python cache files
 __pycache__/
@@ -56,6 +57,7 @@ coverage-final.jsoncache/UTK_age_gender_race/data_cache.npz
 cache/UTK_age_gender_race/data_cache.npz
 cache/UTK_age_gender_race/data_cache.npz
 cache/UTK_age_gender_race/data_cache.npz
+backend/cache/
 backend/cache/
 backend/cache/
 backend/cache/
