@@ -13,6 +13,10 @@ from sklearn.model_selection import train_test_split
 import cv2
 import visualkeras
 from tensorflow.keras.utils import plot_model 
+import dlib
+from skimage.color import rgb2lab
+import time
+import logging
 
 # Load and set up configuration
 with open('config.yaml', 'r') as file:
@@ -38,6 +42,13 @@ def setup_tensorflow_gpu():
     tf.keras.mixed_precision.set_global_policy(policy)
     print("Mixed precision enabled")
 
+class PrintAgePredictions(tf.keras.callbacks.Callback):
+    def on_epoch_end(self, epoch, logs=None):
+        predictions = self.model.predict([self.validation_data[0], self.validation_data[1], self.validation_data[2]])
+        age_predictions = predictions[0]
+        print(f"Age predictions at epoch {epoch + 1}: {age_predictions}")
+
+
 def detect_landmarks(image, predictor_path):
     detector = dlib.get_frontal_face_detector()
     predictor = dlib.shape_predictor(predictor_path)
@@ -50,6 +61,25 @@ def detect_landmarks(image, predictor_path):
             landmarks[i] = (shape.part(i).x, shape.part(i).y)
         return landmarks
     return np.zeros((68, 2), dtype=int)
+
+def detect_beard_mustache(image, landmarks):
+    if landmarks is None or len(landmarks) == 0:
+        return -1, -1
+
+    beard_area = image[landmarks[48][1]:landmarks[8][1], landmarks[48][0]:landmarks[54][0]]
+    mustache_area = image[landmarks[33][1]:landmarks[51][1], landmarks[31][0]:landmarks[35][0]]
+
+    def has_facial_hair(area):
+        if area.size == 0:
+            return -1
+        gray_area = cv2.cvtColor(area, cv2.COLOR_BGR2GRAY)
+        _, binary_area = cv2.threshold(gray_area, 60, 255, cv2.THRESH_BINARY_INV)
+        return np.mean(binary_area)
+
+    beard_presence = has_facial_hair(beard_area)
+    mustache_presence = has_facial_hair(mustache_area)
+
+    return beard_presence, mustache_presence
 
 def extract_hair_color(image, landmarks):
     if landmarks is None or len(landmarks) == 0:
@@ -84,31 +114,54 @@ def extract_face_structure(landmarks):
 
 def extract_additional_features(image, landmarks):
     features = []
+
+    # Wrinkle detection using Laplacian variance
     gray_image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     laplacian_var = cv2.Laplacian(gray_image, cv2.CV_64F).var()
     features.append(laplacian_var)
-    lower_black = np.array([0, 0, 0])
-    upper_black = np.array([180, 255, 30])
-    mask = cv2.inRange(image, lower_black, upper_black)
-    facial_hair_density = np.sum(mask) / (image.shape[0] * image.shape[1])
-    features.append(facial_hair_density)
-    eyebrow_widths = []
-    eyebrow_heights = []
-    for eyebrow in [landmarks[17:22], landmarks[22:27]]:
-        x_coords = eyebrow[:, 0]
-        y_coords = eyebrow[:, 1]
-        width = max(x_coords) - min(x_coords)
-        height = max(y_coords) - min(y_coords)
-        eyebrow_widths.append(width)
-        eyebrow_heights.append(height)
-    features.extend(eyebrow_widths)
-    features.extend(eyebrow_heights)
-    target_length = 10
+
+    # Crow's feet detection around eyes
+    left_eye_region = gray_image[landmarks[36:42, 1].min():landmarks[36:42, 1].max(), landmarks[36:42, 0].min():landmarks[36:42, 0].max()]
+    right_eye_region = gray_image[landmarks[42:48, 1].min():landmarks[42:48, 1].max(), landmarks[42:48, 0].min():landmarks[42:48, 0].max()]
+    crows_feet_left = cv2.Laplacian(left_eye_region, cv2.CV_64F).var() if left_eye_region.size > 0 else 0
+    crows_feet_right = cv2.Laplacian(right_eye_region, cv2.CV_64F).var() if right_eye_region.size > 0 else 0
+    features.append(crows_feet_left)
+    features.append(crows_feet_right)
+
+    # Smile lines detection around mouth
+    mouth_region = gray_image[landmarks[48:60, 1].min():landmarks[48:60, 1].max(), landmarks[48:60, 0].min():landmarks[48:60, 0].max()]
+    smile_lines = cv2.Laplacian(mouth_region, cv2.CV_64F).var() if mouth_region.size > 0 else 0
+    features.append(smile_lines)
+
+    # Eye Aspect Ratio (EAR)
+    def eye_aspect_ratio(eye):
+        A = np.linalg.norm(eye[1] - eye[5])
+        B = np.linalg.norm(eye[2] - eye[4])
+        C = np.linalg.norm(eye[0] - eye[3])
+        ear = (A + B) / (2.0 * C)
+        return ear
+    left_eye = landmarks[36:42]
+    right_eye = landmarks[42:48]
+    ear_left = eye_aspect_ratio(left_eye)
+    ear_right = eye_aspect_ratio(right_eye)
+    features.append(ear_left)
+    features.append(ear_right)
+
+    # Face proportions
+    face_height = np.linalg.norm(landmarks[27] - landmarks[8])
+    face_width = np.linalg.norm(landmarks[0] - landmarks[16])
+    features.append(face_height)
+    features.append(face_width)
+
+    # Ensure all features have consistent length
+    target_length = 14
     if len(features) < target_length:
         features.extend([0] * (target_length - len(features)))
     elif len(features) > target_length:
         features = features[:target_length]
+
     return np.array(features)
+
 
 def extract_symmetry(landmarks):
     if landmarks is None or len(landmarks) == 0:
@@ -128,28 +181,46 @@ def extract_skin_texture(image, landmarks):
     texture_score = cv2.Laplacian(gray_skin, cv2.CV_64F).var()
     return texture_score
 
-def extract_features(image_path, config):
+
+def extract_features(image_path, config, target='age'):
     try:
         predictor_path = config['datasets']['predictor_path']
         image = cv2.imread(image_path)
         if image is None:
             raise ValueError(f"Image at path {image_path} could not be loaded.")
         landmarks = detect_landmarks(image, predictor_path)
+
         hair_color = extract_hair_color(image, landmarks)
         face_structure = extract_face_structure(landmarks)
         additional_features = extract_additional_features(image, landmarks)
         symmetry = extract_symmetry(landmarks)
         skin_texture = extract_skin_texture(image, landmarks)
-        features = np.concatenate([hair_color, face_structure, additional_features, [symmetry, skin_texture]], axis=0)
+
+        beard_presence, mustache_presence = detect_beard_mustache(image, landmarks)
+        facial_hair_features = np.array([beard_presence, mustache_presence])
+
+        if target == 'age':
+            features = np.concatenate([hair_color, face_structure, additional_features, [symmetry, skin_texture], facial_hair_features], axis=0)
+        elif target == 'gender':
+            features = np.concatenate([face_structure, additional_features, facial_hair_features], axis=0)
+        else:
+            raise ValueError(f"Unknown target: {target}")
+
+        # Ensure features have consistent length of 14
         target_length = 14
         if len(features) < target_length:
             features = np.pad(features, (0, target_length - len(features)), 'constant', constant_values=-1)
         elif len(features) > target_length:
             features = features[:target_length]
+
+        # Check for NaN or infinite values and replace them with -1
+        features = np.nan_to_num(features, nan=-1.0, posinf=-1.0, neginf=-1.0)
+        
         return image, landmarks, features
     except Exception as e:
         print(f"Error extracting features: {e}")
         return np.zeros((256, 256, 3), dtype=np.float32), np.zeros((68, 2), dtype=np.float32), np.full(14, -1)
+
 
 def parse_label_from_filename(filename):
     try:
@@ -162,7 +233,8 @@ def parse_label_from_filename(filename):
         print(f"Error parsing label from filename {filename}: {e}")
         return -1, -1, -1
 
-def data_loader(data_dir, validation_split, input_shape, config, batch_size=32, max_images=None, use_cache_only=False):
+
+def data_loader(data_dir, validation_split, input_shape, config, batch_size=4, max_images=None, use_cache_only=False, target='age'):
     cache_dir = os.path.join('cache', 'UTK_age_gender_race', 'split_cache')
     os.makedirs(cache_dir, exist_ok=True)
 
@@ -172,7 +244,13 @@ def data_loader(data_dir, validation_split, input_shape, config, batch_size=32, 
     genders = []
     races = []
 
-    cache_path = os.path.join(cache_dir, 'data_cache.npz')
+    cache_path = os.path.join(cache_dir, f'data_cache_{target}.npz')
+    cached_data = []
+
+    logging.debug(f"Data directory: {data_dir}")
+    logging.debug(f"Predictor path: {config['datasets']['predictor_path']}")
+    logging.debug(f"Max images: {max_images}")
+
     if os.path.exists(cache_path) and use_cache_only:
         print(f"Loading data from {cache_path}...")
         cached = np.load(cache_path, allow_pickle=True)
@@ -181,32 +259,64 @@ def data_loader(data_dir, validation_split, input_shape, config, batch_size=32, 
 
         for data in cached_data:
             images.append(data['image'])
-            features.append(data['features'])
+            features.append(np.nan_to_num(data['features'], nan=-1.0, posinf=-1.0, neginf=-1.0))
             ages.append(data['age'])
             genders.append(data['gender'])
             races.append(data['race'])
+
+        if max_images:
+            images = images[:max_images]
+            features = features[:max_images]
+            ages = ages[:max_images]
+            genders = genders[:max_images]
+            races = races[:max_images]
+
     else:
         image_paths = [os.path.join(data_dir, fname) for fname in os.listdir(data_dir) if fname.endswith('.jpg')]
         if max_images:
             image_paths = image_paths[:max_images]
 
+        print(f"Starting to load {len(image_paths)} images from dataset...")
+
         predictor_path = config['datasets']['predictor_path']
+        start_time = time.time()
 
         for idx, image_path in enumerate(image_paths):
             try:
-                image, _, combined_features = extract_features(image_path, config)
+                print(f"Starting feature extraction for image {idx + 1}/{len(image_paths)}")
+                image, _, combined_features = extract_features(image_path, config, target)
+                print(f"Finished feature extraction for image {idx + 1}/{len(image_paths)}")
+
                 age, gender, race = parse_label_from_filename(os.path.basename(image_path))
 
                 if len(combined_features) == 14:  # Ensure correct feature length
-                    images.append(image)
+                    # Ensure the image is resized to the expected input shape
+                    resized_image = cv2.resize(image, (input_shape[0], input_shape[1]))
+                    images.append(resized_image)
                     features.append(combined_features)
                     ages.append(age)
                     genders.append(gender)
                     races.append(race)
 
+                    cached_data.append({
+                        'image': resized_image,
+                        'features': combined_features,
+                        'age': age,
+                        'gender': gender,
+                        'race': race
+                    })
+
                     if idx > 0 and idx % 250 == 0:
                         np.savez_compressed(cache_path, image_paths=np.array(image_paths), data=np.array(cached_data, dtype=object))
-                        print(f"Cache saved at {cache_path}")
+                        print(f"Processed {idx} images; Cache saved at {cache_path}")
+
+                    # Progress and ETA
+                    if idx > 0 and idx % 50 == 0:
+                        elapsed_time = time.time() - start_time
+                        avg_time_per_image = elapsed_time / idx
+                        eta = avg_time_per_image * (len(image_paths) - idx)
+                        print(f"{idx}/{len(image_paths)} images processed, {elapsed_time:.2f} seconds elapsed, ETA: {eta:.2f} seconds")
+
             except Exception as e:
                 print(f"Error extracting features for {image_path}: {e}")
 
@@ -214,32 +324,121 @@ def data_loader(data_dir, validation_split, input_shape, config, batch_size=32, 
         print(f"Final cache saved at {cache_path}")
 
     if len(images) == 0 or len(features) == 0:
+        print(f"Error: No images or features loaded. Images: {len(images)}, Features: {len(features)}")
         return None, None
 
+    # Ensure all features have consistent shape
+    max_feature_length = max(len(f) for f in features)
+    features = np.array([np.pad(f, (0, max_feature_length - len(f)), 'constant', constant_values=-1) for f in features], dtype=np.float32)
+
+    # Ensure all images are of the same shape
+    print("Checking image shapes before conversion to NumPy array...")
+    for idx, img in enumerate(images):
+        print(f"Image {idx} shape: {img.shape}")
+
+    # Convert images to NumPy array with consistent shape
     images = np.array(images, dtype=np.float32)
-    features = np.array(features, dtype=np.float32)
+
     ages = np.array(ages, dtype=np.int32)
     genders = np.array(genders, dtype=np.int32)
     races = np.array(races, dtype=np.int32)
 
     images = images / 255.0
 
-    x_train_img, x_val_img, x_train_features, x_val_features, y_train, y_val = train_test_split(
-        images, features, np.column_stack((ages, genders, races)), test_size=validation_split, random_state=42
-    )
+    random_state = 42  # Define random state for reproducibility
 
-    y_train_age = y_train[:, 0]
-    y_train_gender = y_train[:, 1]
-    y_train_race = y_train[:, 2]
+    try:
+        x_train_img, x_val_img, y_train_ages, y_val_ages = train_test_split(images, ages, test_size=validation_split, random_state=random_state)
+        x_train_features, x_val_features = train_test_split(features, test_size=validation_split, random_state=random_state)
+        y_train_genders, y_val_genders = train_test_split(genders, test_size=validation_split, random_state=random_state)
+        y_train_races, y_val_races = train_test_split(races, test_size=validation_split, random_state=random_state)
+    except ValueError as e:
+        print(f"Error during train_test_split: {e}")
+        raise
 
-    y_val_age = y_val[:, 0]
-    y_val_gender = y_val[:, 1]
-    y_val_race = y_val[:, 2]
+    # One-hot encode the race labels for the model training process
+    y_train_race_onehot = tf.keras.utils.to_categorical(y_train_races, num_classes=5)
+    y_val_race_onehot = tf.keras.utils.to_categorical(y_val_races, num_classes=5)
 
-    train_data = (x_train_img, x_train_features, y_train_age, y_train_gender, y_train_race)
-    val_data = (x_val_img, x_val_features, y_val_age, y_val_gender, y_val_race)
+    print(f"Training images shape: {x_train_img.shape}")
+    print(f"Validation images shape: {x_val_img.shape}")
+    print(f"Training features shape: {x_train_features.shape}")
+    print(f"Validation features shape: {x_val_features.shape}")
+    print(f"Training ages shape: {y_train_ages.shape}")
+    print(f"Validation ages shape: {y_val_ages.shape}")
+    print(f"Training genders shape: {y_train_genders.shape}")
+    print(f"Validation genders shape: {y_val_genders.shape}")
+    print(f"Training races shape: {y_train_races.shape}")
+    print(f"Validation races shape: {y_val_races.shape}")
+
+    train_data = (x_train_img, x_train_features, y_train_ages, y_train_genders, y_train_races, y_train_race_onehot)
+    val_data = (x_val_img, x_val_features, y_val_ages, y_val_genders, y_val_races, y_val_race_onehot)
 
     return train_data, val_data
+
+def hyperparameter_tuning(x_train_img, x_train_features, y_train_age, y_train_gender, y_train_race, x_val_img, x_val_features, y_val_age, y_val_gender, y_val_race):
+    try:
+        # Hyperparameter Tuning for Age Output
+        print("Starting hyperparameter tuning for age output")
+        stop_early_age = EarlyStopping(monitor='val_mae', patience=2, mode='min')
+        tuner_age = kt.Hyperband(
+            lambda hp: build_model(hp, 'age'),
+            objective='val_mae',
+            max_epochs=5,
+            factor=2,
+            directory='hyperband',
+            project_name='age_tuning',
+            executions_per_trial=1
+        )
+        # Reduce batch size to fit GPU memory
+        batch_size = 4  # Adjust as needed to fit memory constraints
+        tuner_age.search([x_train_img, np.zeros((len(x_train_img), 68, 2)), x_train_features], y_train_age, epochs=5, validation_data=([x_val_img, np.zeros((len(x_val_img), 68, 2)), x_val_features], y_val_age), batch_size=batch_size, callbacks=[stop_early_age])
+        best_hps_age = tuner_age.get_best_hyperparameters(num_trials=1)[0]
+        print(f"Hyperparameter tuning for age completed.")
+
+        # Hyperparameter Tuning for Gender Output
+        print("Starting hyperparameter tuning for gender output")
+        stop_early_gender = EarlyStopping(monitor='val_accuracy', patience=2, mode='max')
+        tuner_gender = kt.Hyperband(
+            lambda hp: build_model(hp, 'gender'),
+            objective='val_accuracy',
+            max_epochs=5,
+            factor=2,
+            directory='hyperband',
+            project_name='gender_tuning',
+            executions_per_trial=1
+        )
+        # Reduce batch size to fit GPU memory
+        tuner_gender.search([x_train_img, np.zeros((len(x_train_img), 68, 2)), x_train_features], y_train_gender, epochs=5, validation_data=([x_val_img, np.zeros((len(x_val_img), 68, 2)), x_val_features], y_val_gender), batch_size=batch_size, callbacks=[stop_early_gender])
+        best_hps_gender = tuner_gender.get_best_hyperparameters(num_trials=1)[0]
+        print(f"Hyperparameter tuning for gender completed.")
+
+        # Hyperparameter Tuning for Race Output
+        print("Starting hyperparameter tuning for race output")
+        stop_early_race = EarlyStopping(monitor='val_accuracy', patience=2, mode='max')
+        tuner_race = kt.Hyperband(
+            lambda hp: build_model(hp, 'race'),
+            objective='val_accuracy',
+            max_epochs=5,
+            factor=2,
+            directory='hyperband',
+            project_name='race_tuning',
+            executions_per_trial=1
+        )
+
+        # One-hot encode the race labels for the hyperparameter tuning process
+        y_train_race_onehot = tf.keras.utils.to_categorical(y_train_race, num_classes=5)
+        y_val_race_onehot = tf.keras.utils.to_categorical(y_val_race, num_classes=5)
+
+        # Reduce batch size to fit GPU memory
+        tuner_race.search([x_train_img, np.zeros((len(x_train_img), 68, 2)), x_train_features], y_train_race_onehot, epochs=5, validation_data=([x_val_img, np.zeros((len(x_val_img), 68, 2)), x_val_features], y_val_race_onehot), batch_size=batch_size, callbacks=[stop_early_race])
+        best_hps_race = tuner_race.get_best_hyperparameters(num_trials=1)[0]
+        print(f"Hyperparameter tuning for race completed.")
+
+        return best_hps_age, best_hps_gender, best_hps_race
+    except Exception as e:
+        print(f"Error during hyperparameter tuning: {e}")
+        raise
 
 def build_model(hp, output_type=None):
     input_shape_images = (256, 256, 3)
@@ -251,16 +450,16 @@ def build_model(hp, output_type=None):
     landmark_input = Input(shape=input_shape_landmarks, name='landmark_input')
     features_input = Input(shape=input_shape_features, name='features_input')
 
-    x = Conv2D(hp.Int('conv_1_filter', min_value=32, max_value=96, step=16), (3, 3), padding='same')(image_input)
-    x = LeakyReLU(alpha=0.1)(x)
+    x = Conv2D(hp.Int('conv_1_filter', min_value=32, max_value=256, step=32), (3, 3), padding='same')(image_input)
+    x = LeakyReLU(negative_slope=0.1)(x)  # Updated here
     x = BatchNormalization()(x)
-    x = Conv2D(hp.Int('conv_2_filter', min_value=32, max_value=96, step=16), (3, 3), padding='same')(x)
-    x = LeakyReLU(alpha=0.1)(x)
+    x = Conv2D(hp.Int('conv_2_filter', min_value=32, max_value=256, step=32), (3, 3), padding='same')(x)
+    x = LeakyReLU(negative_slope=0.1)(x)  # Updated here
     x = BatchNormalization()(x)
     x = MaxPooling2D((2, 2))(x)
 
-    x = Conv2D(hp.Int('conv_3_filter', min_value=32, max_value=128, step=16), (3, 3), padding='same')(x)
-    x = LeakyReLU(alpha=0.1)(x)
+    x = Conv2D(hp.Int('conv_3_filter', min_value=32, max_value=256, step=32), (3, 3), padding='same')(x)
+    x = LeakyReLU(negative_slope=0.1)(x)  # Updated here
     x = BatchNormalization()(x)
     x = MaxPooling2D((2, 2))(x)
 
@@ -296,74 +495,33 @@ def build_model(hp, output_type=None):
     )
     return model
 
+
 # Prepare final training data
 train_data, val_data = data_loader(
     config['datasets']['age_gender_race_data'], 
     config['validation_split'], 
     config['model_params']['input_shape'], 
     config, 
-    batch_size=8, 
-    max_images=3000, 
-    use_cache_only=True
+    batch_size=4, 
+    max_images=128, 
+    use_cache_only=False
 )
-(x_train_img, x_train_features, y_train_age, y_train_gender, y_train_race) = train_data
-(x_val_img, x_val_features, y_val_age, y_val_gender, y_val_race) = val_data
+(x_train_img, x_train_features, y_train_age, y_train_gender, y_train_race, y_train_race_onehot) = train_data
+(x_val_img, x_val_features, y_val_age, y_val_gender, y_val_race, y_val_race_onehot) = val_data
 
-# Hyperparameter Tuning for Age Output
-print("Starting hyperparameter tuning for age output")
-stop_early_age = EarlyStopping(monitor='val_mae', patience=5, mode='min')
-tuner_age = kt.Hyperband(
-    lambda hp: build_model(hp, 'age'),
-    objective='val_mae',
-    max_epochs=10,
-    factor=3,
-    directory='hyperband',
-    project_name='age_tuning'
-)
-# Reduce batch size to fit GPU memory
-batch_size = 8  # Adjust as needed to fit memory constraints
-tuner_age.search([x_train_img, np.zeros((len(x_train_img), 68, 2)), x_train_features], y_train_age, epochs=10, validation_data=([x_val_img, np.zeros((len(x_val_img), 68, 2)), x_val_features], y_val_age), batch_size=batch_size, callbacks=[stop_early_age])
-best_hps_age = tuner_age.get_best_hyperparameters(num_trials=1)[0]
-print(f"Hyperparameter tuning for age completed.")
+# Perform hyperparameter tuning
+best_hps_age, best_hps_gender, best_hps_race = hyperparameter_tuning(x_train_img, x_train_features, y_train_age, y_train_gender, y_train_race, x_val_img, x_val_features, y_val_age, y_val_gender, y_val_race)
 
-# Hyperparameter Tuning for Gender Output
-print("Starting hyperparameter tuning for gender output")
-stop_early_gender = EarlyStopping(monitor='val_accuracy', patience=5, mode='max')
-tuner_gender = kt.Hyperband(
-    lambda hp: build_model(hp, 'gender'),
-    objective='val_accuracy',
-    max_epochs=10,
-    factor=3,
-    directory='hyperband',
-    project_name='gender_tuning'
-)
-# Reduce batch size to fit GPU memory
-tuner_gender.search([x_train_img, np.zeros((len(x_train_img), 68, 2)), x_train_features], y_train_gender, epochs=10, validation_data=([x_val_img, np.zeros((len(x_val_img), 68, 2)), x_val_features], y_val_gender), batch_size=batch_size, callbacks=[stop_early_gender])
-best_hps_gender = tuner_gender.get_best_hyperparameters(num_trials=1)[0]
-print(f"Hyperparameter tuning for gender completed.")
 
-# Hyperparameter Tuning for Race Output
-print("Starting hyperparameter tuning for race output")
-stop_early_race = EarlyStopping(monitor='val_accuracy', patience=5, mode='max')
-tuner_race = kt.Hyperband(
-    lambda hp: build_model(hp, 'race'),
-    objective='val_accuracy',
-    max_epochs=10,
-    factor=3,
-    directory='hyperband',
-    project_name='race_tuning'
-)
-
-# One-hot encode the race labels for the hyperparameter tuning process
-y_train_race_onehot = tf.keras.utils.to_categorical(y_train_race, num_classes=5)
-y_val_race_onehot = tf.keras.utils.to_categorical(y_val_race, num_classes=5)
-
-# Reduce batch size to fit GPU memory
-tuner_race.search([x_train_img, np.zeros((len(x_train_img), 68, 2)), x_train_features], y_train_race_onehot, epochs=10, validation_data=([x_val_img, np.zeros((len(x_val_img), 68, 2)), x_val_features], y_val_race_onehot), batch_size=batch_size, callbacks=[stop_early_race])
-best_hps_race = tuner_race.get_best_hyperparameters(num_trials=1)[0]
-print(f"Hyperparameter tuning for race completed.")
 
 # Combine the best hyperparameters
+# Define the custom metric function
+def clip_age(y_true, y_pred):
+    y_true = tf.cast(y_true, tf.float32)
+    y_pred = tf.clip_by_value(y_pred, 0, 116)
+    return tf.reduce_mean(tf.abs(y_true - y_pred))
+
+# Build the model function
 def build_age_gender_race_model(input_shape_images, input_shape_landmarks, input_shape_features, num_races):
     try:
         image_input = Input(shape=input_shape_images, name='image_input')
@@ -371,15 +529,15 @@ def build_age_gender_race_model(input_shape_images, input_shape_landmarks, input
         features_input = Input(shape=input_shape_features, name='features_input')
 
         x = Conv2D(best_hps_age.get('conv_1_filter'), (3, 3), padding='same')(image_input)
-        x = LeakyReLU(alpha=0.1)(x)
+        x = LeakyReLU(negative_slope=0.1)(x)  # Updated here
         x = BatchNormalization()(x)
         x = Conv2D(best_hps_age.get('conv_2_filter'), (3, 3), padding='same')(x)
-        x = LeakyReLU(alpha=0.1)(x)
+        x = LeakyReLU(negative_slope=0.1)(x)  # Updated here
         x = BatchNormalization()(x)
         x = MaxPooling2D((2, 2))(x)
 
         x = Conv2D(best_hps_age.get('conv_3_filter'), (3, 3), padding='same')(x)
-        x = LeakyReLU(alpha=0.1)(x)
+        x = LeakyReLU(negative_slope=0.1)(x)  # Updated here
         x = BatchNormalization()(x)
         x = MaxPooling2D((2, 2))(x)
 
@@ -412,11 +570,6 @@ def build_age_gender_race_model(input_shape_images, input_shape_landmarks, input
             }
         )
 
-        # Adding a clipping layer for age predictions to ensure they are within the desired range
-        def clip_age(y_true, y_pred):
-            y_pred = tf.clip_by_value(y_pred, 0, 116)
-            return tf.reduce_mean(tf.abs(y_true - y_pred))
-
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=best_hps_age.get('learning_rate')),
             loss={
@@ -436,6 +589,7 @@ def build_age_gender_race_model(input_shape_images, input_shape_landmarks, input
         print(f"Error building the model: {e}")
         raise
 
+
 # Build and train the final model
 model = build_age_gender_race_model(
     input_shape_images=(256, 256, 3),
@@ -453,7 +607,9 @@ if not os.path.exists(checkpoint_dir):
 checkpoint = ModelCheckpoint(os.path.join(checkpoint_dir, 'age_gender_race_model_best.keras'), monitor='val_loss', save_best_only=True)
 
 epochs = 100
-batch_size = 16  # Reduce batch size to fit in GPU memory
+batch_size = 4  # Reduce batch size to fit in GPU memory
+
+print_age_predictions = PrintAgePredictions()
 
 print("Starting model training")
 history = model.fit(
@@ -465,7 +621,7 @@ history = model.fit(
     ),
     epochs=epochs,
     batch_size=batch_size,
-    callbacks=[early_stopping, reduce_lr, lr_scheduler, checkpoint]
+    callbacks=[early_stopping, reduce_lr, lr_scheduler, checkpoint, print_age_predictions]
 )
 
 print("Model training completed successfully")
@@ -530,9 +686,23 @@ plt.close()
 print("Training metrics plot closed after 2 minutes.")
 
 # Visualize the model architecture
-plot_model(model, to_file='model_architecture.png', show_shapes=True, show_layer_names=True)
+plot_model(model, to_file='agr_model_architecture.png', show_shapes=True, show_layer_names=True)
 print("Model architecture plot saved as 'model_architecture.png'")
 
 # Visualize using visualkeras
-visualkeras.layered_view(model, to_file='model_visualization.png').show()
+visualkeras.layered_view(model, to_file='agr_model_visualization.png').show()
 print("Model visualization saved as 'model_visualization.png'")
+
+
+# Evaluate the model
+print("Evaluating the model...")
+evaluation_results = model.evaluate(
+    [x_val_img, np.zeros((len(x_val_img), 68, 2)), x_val_features], 
+    {'final_output_age': y_val_age, 'final_output_gender': y_val_gender, 'final_output_race': tf.keras.utils.to_categorical(y_val_race, num_classes=5)}
+)
+print("Evaluation results:", evaluation_results)
+
+# Example predictions
+print("Making example predictions...")
+example_predictions = model.predict([x_val_img[:10], np.zeros((10, 68, 2)), x_val_features[:10]])
+print("Example predictions:", example_predictions)

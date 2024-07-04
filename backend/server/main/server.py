@@ -13,7 +13,6 @@ from flask_cors import CORS
 import socket
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-
 from models.mood.attention_layer import add_attention_layer
 
 # Define the template and static folder paths
@@ -28,17 +27,16 @@ config_path = 'config.yaml'
 with open(config_path, 'r') as file:
     config = yaml.safe_load(file)
 
-# Ensure model directory exists
+# Ensure model directories exist
 mood_model_dir = "./models/mood/models"
 age_gender_race_model_dir = "./models/age_gender_race/models"
 if not os.path.exists(mood_model_dir):
     os.makedirs(mood_model_dir)
 
-# Load the trained mood model
+# Load the trained models
 mood_model_path = os.path.join(mood_model_dir, 'teacher_model.keras')
 mood_model = tf.keras.models.load_model(mood_model_path)
 
-# Load the trained age, gender, race model
 age_gender_race_model_path = os.path.join(age_gender_race_model_dir, 'age_gender_race_model_final.keras')
 age_gender_race_model = tf.keras.models.load_model(age_gender_race_model_path)
 
@@ -48,6 +46,7 @@ predictor_path = config['datasets']['predictor_path']
 predictor = dlib.shape_predictor(predictor_path)
 
 mood_label_map = {0: "angry", 1: "disgust", 2: "fear", 3: "happy", 4: "sad", 5: "surprise", 6: "neutral"}
+race_label_map = {0: "White", 1: "Black", 2: "Asian", 3: "Indian", 4: "Other"}
 
 def calculate_angle(p1, p2):
     return np.degrees(np.arctan2(p2[1] - p1[1], p2[0] - p1[0]))
@@ -69,7 +68,6 @@ def mouth_shape_classification(mouth_ratio, mouth_corner_angle_left, mouth_corne
         return 'unknown'
 
 def extract_features(image, landmarks):
-    # Calculate features
     mouth_height = np.linalg.norm(landmarks[62] - landmarks[66])
     mouth_width = np.linalg.norm(landmarks[60] - landmarks[64])
     mouth_ratio = mouth_height / mouth_width if mouth_width != 0 else 0
@@ -80,7 +78,6 @@ def extract_features(image, landmarks):
     right_eye_ratio = np.linalg.norm(landmarks[43] - landmarks[47]) / np.linalg.norm(landmarks[42] - landmarks[45]) if np.linalg.norm(landmarks[42] - landmarks[45]) != 0 else 0
     eye_ratio = (left_eye_ratio + right_eye_ratio) / 2
 
-    # Additional features
     mouth_angle = calculate_angle(landmarks[48], landmarks[54])
     mouth_corner_angle_left = calculate_angle(landmarks[48], landmarks[66])
     mouth_corner_angle_right = calculate_angle(landmarks[54], landmarks[66])
@@ -98,15 +95,13 @@ def extract_features(image, landmarks):
         mouth_corners_up, mouth_corners_down
     ]
 
-    # Encode mouth shape as one-hot vector
     mouth_shape_dict = {'D': 0, 'O': 1, ')': 2, '(': 3, 'R': 4, '|': 5, 'unknown': 6}
     mouth_shape_one_hot = np.zeros(len(mouth_shape_dict))
     mouth_shape_one_hot[mouth_shape_dict[mouth_shape]] = 1
 
     features = additional_features + mouth_shape_one_hot.tolist()
 
-    # Ensure features have the same length as expected by the model (pad if necessary)
-    feature_length = 14  # Updated feature length to 14
+    feature_length = 14  # Ensure the feature length is 14
     if len(features) < feature_length:
         features += [0] * (feature_length - len(features))
     elif len(features) > feature_length:
@@ -159,7 +154,7 @@ def predict_mood():
 
         # Extract features from the resized image and landmarks
         features = extract_features(resized_image, landmarks)
-        features = np.expand_dims(features.astype('float32') / 255.0, axis=0)
+        features = np.expand_dims(features.astype('float32'), axis=0)
 
         # Debug: Print the shapes of image and features
         print(f"Shape of resized_image: {resized_image.shape}")
@@ -191,7 +186,6 @@ def predict_mood():
         pred_age = age_gender_race_prediction[0][0]
         pred_gender = 'Male' if age_gender_race_prediction[1][0] > 0.5 else 'Female'
         pred_race_idx = np.argmax(age_gender_race_prediction[2][0])
-        race_label_map = {0: "White", 1: "Black", 2: "Asian", 3: "Indian", 4: "Other"}
         pred_race = race_label_map[pred_race_idx]
 
         # Debug: Print predictions
@@ -238,8 +232,6 @@ def predict_mood():
         print(f"Prediction error: {e}")
         return jsonify({'error': str(e)}), 500
 
-
-
 @app.route('/history', methods=['GET'])
 def history():
     try:
@@ -275,4 +267,3 @@ if __name__ == '__main__':
         yaml.safe_dump(config, file)
 
     app.run(host=config['server']['host'], port=available_port, debug=True)
-
