@@ -38,7 +38,7 @@ document.addEventListener("DOMContentLoaded", () => {
         1: "Black",
         2: "Asian",
         3: "Indian",
-        4: "Others"
+        4: "Other"
     };
 
     const raceColors = {
@@ -46,7 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
         1: 'rgba(54, 162, 235, 0.2)',  // Black
         2: 'rgba(75, 192, 192, 0.2)',  // Asian
         3: 'rgba(153, 102, 255, 0.2)',  // Indian
-        4: 'rgba(255, 159, 64, 0.2)'  // Others
+        4: 'rgba(255, 159, 64, 0.2)'  // Other
     };
 
     const moodChartContext = document.getElementById('mood-graph').getContext('2d');
@@ -168,11 +168,11 @@ document.addEventListener("DOMContentLoaded", () => {
         chart.update();
     }
 
-    function updateTimeline(imagePath, mood, confidence) {
+    function updateTimeline(imagePath, mood, mood_confidence) {
         const carouselSlides = document.querySelector('.carousel__slides');
         const carouselThumbnails = document.querySelector('.carousel__thumbnails');
         const slideIndex = carouselSlides.children.length + 1;
-
+    
         const slide = document.createElement('li');
         slide.classList.add('carousel__slide');
         slide.innerHTML = `
@@ -181,21 +181,21 @@ document.addEventListener("DOMContentLoaded", () => {
                     <img src="${imagePath}" alt="">
                 </div>
                 <figcaption>
-                    Mood: ${mood} (${confidence}%)
+                    Mood: ${mood} (${mood_confidence}%)
                 </figcaption>
             </figure>
         `;
-
+    
         const thumbnail = document.createElement('li');
         thumbnail.innerHTML = `
             <label for="slide-${slideIndex}">
                 <img src="${imagePath}" alt="">
             </label>
         `;
-
+    
         carouselSlides.appendChild(slide);
         carouselThumbnails.appendChild(thumbnail);
-
+    
         if (slideIndex > 6) {
             const newInput = document.createElement('input');
             newInput.type = 'radio';
@@ -275,18 +275,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 if (result.error) {
                     throw new Error(result.error);
                 }
-                const { mood, confidence_mood, age, gender, race, image_path } = result;
-                moodDisplay.textContent = `Mood: ${mood} (${confidence_mood}%)`;
-                moodDisplay.style.color = confidence_mood > 70 ? 'green' : confidence_mood > 40 ? 'yellow' : 'red';
+                const { mood, mood_confidence, age, gender, race, image_path } = result;
+                moodDisplay.textContent = `Mood: ${mood} (${mood_confidence}%)`;
+                moodDisplay.style.color = mood_confidence > 70 ? 'green' : mood_confidence > 40 ? 'yellow' : 'red';
                 ageDisplay.textContent = `Age: ${age}`;
                 genderDisplay.textContent = `Gender: ${gender}`;
                 raceDisplay.textContent = `Race: ${race}`;
-                updateGraph(moodChart, Object.keys(moodLabelMap).find(key => moodLabelMap[key] === mood), confidence_mood);
+                updateGraph(moodChart, Object.keys(moodLabelMap).find(key => moodLabelMap[key] === mood), mood_confidence);
                 updateGraph(ageChart, 0, age);
-                genderChart.data.datasets[0].data = [gender === 'Male' ? confidence_mood : 0, gender === 'Female' ? confidence_mood : 0]; // Update gender confidence graph
+                genderChart.data.datasets[0].data = [gender === 'Male' ? mood_confidence : 0, gender === 'Female' ? mood_confidence : 0]; // Update gender confidence graph
                 genderChart.update();
-                updateGraph(raceChart, Object.keys(raceLabelMap).find(key => raceLabelMap[key] === race), confidence_mood);  // Update race confidence graph
-                updateTimeline(image_path, mood, confidence_mood);
+                updateGraph(raceChart, Object.keys(raceLabelMap).find(key => raceLabelMap[key] === race), mood_confidence);  // Update race confidence graph
+                updateTimeline(image_path, mood, mood_confidence);
             } catch (error) {
                 errorDisplay.textContent = `Error: ${error.message}`;
             }
@@ -304,9 +304,9 @@ document.addEventListener("DOMContentLoaded", () => {
                 throw new Error(result.error);
             }
             result.history.forEach(item => {
-                updateTimeline(item.image_path, item.mood, item.confidence);
+                updateTimeline(item.image_path, item.mood, item.mood_confidence);
             });
-        } catch (error) {
+            } catch (error) {
             console.error(`Error loading history: ${error.message}`);
         }
     }

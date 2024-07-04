@@ -110,6 +110,9 @@ def load_data(data_dir, predictor_path, subset, batch_size=64, max_images_per_cl
 
     return np.array(images), np.array(features), to_categorical(labels, num_classes=7), generator.class_indices
 
+# Load the trained model
+model = load_model(teacher_model_path)
+
 # Load validation data
 val_images, val_features, val_labels, class_indices = load_data(val_data_dir, predictor_path, 'validation', max_images_per_class=10)
 

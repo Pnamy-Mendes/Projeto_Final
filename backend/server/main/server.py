@@ -13,7 +13,12 @@ from flask_cors import CORS
 import socket
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../..')))
-from models.mood.attention_layer import add_attention_layer
+from models.mood.attention_layer import AttentionLayer
+
+def clip_age(y_true, y_pred):
+    y_true = tf.cast(y_true, tf.float32)
+    y_pred = tf.clip_by_value(y_pred, 0, 116)
+    return tf.reduce_mean(tf.abs(y_true - y_pred))
 
 # Define the template and static folder paths
 template_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../../frontend/templates'))
@@ -37,8 +42,9 @@ if not os.path.exists(mood_model_dir):
 mood_model_path = os.path.join(mood_model_dir, 'teacher_model.keras')
 mood_model = tf.keras.models.load_model(mood_model_path)
 
-age_gender_race_model_path = os.path.join(age_gender_race_model_dir, 'age_gender_race_model_final.keras')
-age_gender_race_model = tf.keras.models.load_model(age_gender_race_model_path)
+
+age_gender_race_model_path = os.path.join(age_gender_race_model_dir, 'age_gender_race_model_best.keras')
+age_gender_race_model = tf.keras.models.load_model(age_gender_race_model_path, custom_objects={'clip_age': clip_age})
 
 # Initialize dlib's face detector
 detector = dlib.get_frontal_face_detector()
@@ -184,7 +190,7 @@ def predict_mood():
         age_gender_race_prediction = age_gender_race_model.predict([image_expanded_for_age_gender_race, landmarks_expanded, features])
         
         pred_age = age_gender_race_prediction[0][0]
-        pred_gender = 'Male' if age_gender_race_prediction[1][0] > 0.5 else 'Female'
+        pred_gender = 'Female' if age_gender_race_prediction[1][0] > 0.5 else 'Male'
         pred_race_idx = np.argmax(age_gender_race_prediction[2][0])
         pred_race = race_label_map[pred_race_idx]
 
